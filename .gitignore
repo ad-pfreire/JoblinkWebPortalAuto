@@ -1,0 +1,17 @@
+
+# Playwright
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
+.claude/
+.github/
+.playwright-mcp/
+specs/
+
+# Environment variables
+.env
+.env.local
+!.env.example
