@@ -17,8 +17,11 @@ jobs:
       run: npm ci
     - name: Install Playwright Browsers
       run: npx playwright install --with-deps
-    - name: Run Playwright tests
-      run: npx playwright test
+    # Everything except the scenarios that depend on a real, timing-sensitive
+    # inbound email (Mandrill/SES -> Gmail over IMAP). This step must pass —
+    # a failure here is a real regression, not infrastructure flakiness.
+    - name: Run Playwright tests (core)
+      run: npx playwright test --grep-invert @real-email
       env:
         BASE_URL: ${{ secrets.BASE_URL }}
         TEST_EMAIL_USER: ${{ secrets.TEST_EMAIL_USER }}
@@ -33,4 +36,30 @@ jobs:
       with:
         name: playwright-report
         path: playwright-report/
+        retention-days: 30
+
+    # The 3 scenarios tagged @real-email (full registration, full password
+    # reset, account deletion) each wait on a real email arriving within a
+    # timeout budget. Delivery timing is outside the app's and the test's
+    # control, so this step is allowed to fail without failing the workflow
+    # or blocking a PR merge — it still runs and reports so a real, lasting
+    # break in these flows stays visible instead of silently ignored.
+    - name: Run Playwright tests (real email, known flaky)
+      continue-on-error: true
+      run: npx playwright test --grep @real-email --output=test-results-real-email
+      env:
+        PLAYWRIGHT_HTML_REPORT: playwright-report-real-email
+        BASE_URL: ${{ secrets.BASE_URL }}
+        TEST_EMAIL_USER: ${{ secrets.TEST_EMAIL_USER }}
+        TEST_EMAIL_DOMAIN: ${{ secrets.TEST_EMAIL_DOMAIN }}
+        TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
+        TEST_LOGIN_PASSWORD: ${{ secrets.TEST_LOGIN_PASSWORD }}
+        TEST_REGISTER_PASSWORD: ${{ secrets.TEST_REGISTER_PASSWORD }}
+        GMAIL_IMAP_USER: ${{ secrets.GMAIL_IMAP_USER }}
+        GMAIL_IMAP_APP_PASSWORD: ${{ secrets.GMAIL_IMAP_APP_PASSWORD }}
+    - uses: actions/upload-artifact@v4
+      if: ${{ !cancelled() }}
+      with:
+        name: playwright-report-real-email
+        path: playwright-report-real-email/
         retention-days: 30

@@ -64,7 +64,7 @@ test.describe('Account Registration', () => {
 test.describe('Account Registration - full flow with real email', () => {
   test.describe.configure({ retries: 1 });
 
-  test('should verify email, validate and complete the profile form, and log in after registering', async ({ page, browserName }) => {
+  test('should verify email, validate and complete the profile form, and log in after registering @real-email', async ({ page, browserName }) => {
     // The backend flow this test exercises is browser-agnostic, so it only
     // runs on chromium — running it 3x in parallel (once per browser
     // project) each adds real signups competing for the same Mandrill/SES
