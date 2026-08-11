@@ -12,21 +12,23 @@ const CASE_INSENSITIVE_EMAIL = REGISTERED_EMAIL.toUpperCase();
 // specs/forgot-password-test-plan.md section 2.4). Used for the
 // reset-password page tests below so they don't depend on, or interfere
 // with, the real REGISTERED_EMAIL inbox. Generated fresh per call (rather
-// than a single shared literal) because parallel workers submitting the
-// exact same address to /forgot-password at the same moment were
-// occasionally left on /forgot-password instead of redirecting — the
-// backend appears to debounce identical concurrent requests.
+// than a single shared literal) so no two calls, even across parallel
+// workers, ever submit the exact same address.
 function generateUnregisteredEmail() {
   return `noexiste-qa-test-${Date.now().toString(36)}${Math.floor(Math.random() * 10000)}@crifa.com`;
 }
 
 // Drives the forgot-password form to reach /reset-password, the shared entry
-// point for all of the reset-password page tests below.
+// point for all of the reset-password page tests below. This redirect has
+// been observed to occasionally take longer than the default 5s assertion
+// timeout on the real pre-staging backend (same root cause documented on
+// registerNewAccount() in tests/utils/account.ts), so it gets a more
+// generous one here too.
 async function goToResetPassword(page: Page, email: string) {
   await page.goto(`${BASE_URL}/forgot-password`);
   await page.locator('input[name="username"]').fill(email);
   await page.locator('button[type="submit"]').click();
-  await expect(page).toHaveURL(/.*\/reset-password$/);
+  await expect(page).toHaveURL(/.*\/reset-password$/, { timeout: 15_000 });
 }
 
 test.describe('Forgot Password flow', () => {
@@ -74,7 +76,9 @@ test.describe('Forgot Password flow', () => {
     await continueButton.click();
 
     // 5. Verify that it redirects to reset-password and shows the confirmation message.
-    await expect(page).toHaveURL(/.*\/reset-password$/);
+    // This redirect can occasionally take longer than the default 5s on the
+    // real pre-staging backend (see goToResetPassword() above for the same note).
+    await expect(page).toHaveURL(/.*\/reset-password$/, { timeout: 15_000 });
     await expect(page.locator('text=We have sent a password reset code in an email message')).toBeVisible();
   });
 
@@ -93,7 +97,7 @@ test.describe('Forgot Password flow', () => {
 
     // 4. Submit the request and validate the flow.
     await continueButton.click();
-    await expect(page).toHaveURL(/.*\/reset-password$/);
+    await expect(page).toHaveURL(/.*\/reset-password$/, { timeout: 15_000 });
     await expect(page.locator('text=We have sent a password reset code in an email message')).toBeVisible();
   });
 
@@ -128,7 +132,7 @@ test.describe('Forgot Password flow', () => {
     await continueButton.click();
 
     // 4. Verify that the flow continues and the confirmation is shown.
-    await expect(page).toHaveURL(/.*\/reset-password$/);
+    await expect(page).toHaveURL(/.*\/reset-password$/, { timeout: 15_000 });
     await expect(page.locator('text=We have sent a password reset code in an email message')).toBeVisible();
   });
 });
@@ -267,7 +271,7 @@ test.describe('Full end-to-end password reset (real email, real code)', () => {
     await page.goto(`${BASE_URL}/forgot-password`);
     await page.locator('input[name="username"]').fill(emailAlias);
     await page.locator('button[type="submit"]').click();
-    await expect(page).toHaveURL(/.*\/reset-password$/);
+    await expect(page).toHaveURL(/.*\/reset-password$/, { timeout: 15_000 });
 
     // 3. Fetch the real 6-digit code from the "Password Recovery" email.
     const code = await getPasswordResetCode(emailAlias, resetRequestedAt);
