@@ -17,9 +17,13 @@ jobs:
       run: npm ci
     - name: Install Playwright Browsers
       run: npx playwright install --with-deps
-    # Everything except the scenarios that depend on a real, timing-sensitive
-    # inbound email (Mandrill/SES -> Gmail over IMAP). This step must pass —
-    # a failure here is a real regression, not infrastructure flakiness.
+    # Everything except the scenarios that depend on the real pre-staging
+    # email pipeline (Mandrill/SES -> Gmail over IMAP) — this covers not just
+    # tests that read an email, but every /forgot-password submission, since
+    # that request itself has been confirmed (live, with zero concurrency)
+    # to intermittently hang on the real backend, apparently tied to that
+    # same pipeline. This step must pass — a failure here is a real
+    # regression, not infrastructure flakiness.
     - name: Run Playwright tests (core)
       run: npx playwright test --grep-invert @real-email
       env:
@@ -38,12 +42,12 @@ jobs:
         path: playwright-report/
         retention-days: 30
 
-    # The 3 scenarios tagged @real-email (full registration, full password
-    # reset, account deletion) each wait on a real email arriving within a
-    # timeout budget. Delivery timing is outside the app's and the test's
-    # control, so this step is allowed to fail without failing the workflow
-    # or blocking a PR merge — it still runs and reports so a real, lasting
-    # break in these flows stays visible instead of silently ignored.
+    # Scenarios tagged @real-email: the 2 full end-to-end flows that wait on
+    # a real inbound email, plus every forgot-password test whose submission
+    # depends on that same pipeline being healthy (see comment above). This
+    # step is allowed to fail without failing the workflow or blocking a PR
+    # merge — it still runs and reports so a real, lasting break in these
+    # flows stays visible instead of silently ignored.
     - name: Run Playwright tests (real email, known flaky)
       continue-on-error: true
       run: npx playwright test --grep @real-email --output=test-results-real-email
