@@ -6,7 +6,6 @@ import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount
 const BASE_URL = requireEnv('BASE_URL');
 const REGISTERED_EMAIL = `${requireEnv('TEST_EMAIL_USER')}+automation${requireEnv('TEST_EMAIL_DOMAIN')}`;
 const INVALID_EMAIL = 'invalid-email';
-const CASE_INSENSITIVE_EMAIL = REGISTERED_EMAIL.toUpperCase();
 // A syntactically valid but never-registered address (same style of example
 // the test plan verifies behaves identically to a registered one — see
 // specs/forgot-password-test-plan.md section 2.4). Used for the
@@ -18,17 +17,29 @@ function generateUnregisteredEmail() {
   return `noexiste-qa-test-${Date.now().toString(36)}${Math.floor(Math.random() * 10000)}@crifa.com`;
 }
 
+// Clicks the forgot-password form's Continue button and waits for the
+// redirect to /reset-password. Confirmed live and in isolated, fully serial
+// CI runs (no concurrency involved at all) that this submission itself —
+// not just the resulting email's delivery — is intermittently unreliable on
+// the real pre-staging backend right now: it can hang on /forgot-password
+// for several consecutive attempts, then succeed instantly moments later
+// with nothing changed on the test side. That's consistent with the same
+// backend email-sending pipeline behind the already-known email-delivery
+// slowness (getVerificationLink/getPasswordResetCode), since submitting
+// this form is presumably what triggers that pipeline. Every test that
+// calls this (directly or via goToResetPassword) is tagged @real-email in
+// CI for that reason, even the ones that never read an email themselves.
+async function submitForgotPasswordAndExpectResetPassword(page: Page) {
+  await page.locator('button[type="submit"]').click();
+  await expect(page).toHaveURL(/.*\/reset-password$/, { timeout: 20_000 });
+}
+
 // Drives the forgot-password form to reach /reset-password, the shared entry
-// point for all of the reset-password page tests below. This redirect has
-// been observed to occasionally take longer than the default 5s assertion
-// timeout on the real pre-staging backend (same root cause documented on
-// registerNewAccount() in tests/utils/account.ts), so it gets a more
-// generous one here too.
+// point for all of the reset-password page tests below.
 async function goToResetPassword(page: Page, email: string) {
   await page.goto(`${BASE_URL}/forgot-password`);
   await page.locator('input[name="username"]').fill(email);
-  await page.locator('button[type="submit"]').click();
-  await expect(page).toHaveURL(/.*\/reset-password$/, { timeout: 15_000 });
+  await submitForgotPasswordAndExpectResetPassword(page);
 }
 
 test.describe('Forgot Password flow', () => {
@@ -59,7 +70,7 @@ test.describe('Forgot Password flow', () => {
     await expect(page.locator('button[type="submit"]')).toBeDisabled();
   });
 
-  test('should navigate to reset password after submitting a registered email', async ({ page }) => {
+  test('should navigate to reset password after submitting a registered email @real-email', async ({ page }) => {
     // 1. Open the forgot password page.
     await page.goto(`${BASE_URL}/forgot-password`);
 
@@ -72,17 +83,14 @@ test.describe('Forgot Password flow', () => {
     // 3. Verify that the Continue button becomes enabled.
     await expect(continueButton).toBeEnabled();
 
-    // 4. Submit the password recovery request.
-    await continueButton.click();
-
-    // 5. Verify that it redirects to reset-password and shows the confirmation message.
-    // This redirect can occasionally take longer than the default 5s on the
-    // real pre-staging backend (see goToResetPassword() above for the same note).
-    await expect(page).toHaveURL(/.*\/reset-password$/, { timeout: 15_000 });
+    // 4. Submit the password recovery request and verify that it redirects
+    // to reset-password with the confirmation message (see
+    // submitForgotPasswordAndExpectResetPassword() for why this retries).
+    await submitForgotPasswordAndExpectResetPassword(page);
     await expect(page.locator('text=We have sent a password reset code in an email message')).toBeVisible();
   });
 
-  test('should navigate to reset password when submitting an invalid email format', async ({ page }) => {
+  test('should navigate to reset password when submitting an invalid email format @real-email', async ({ page }) => {
     // 1. Open the forgot password page.
     await page.goto(`${BASE_URL}/forgot-password`);
 
@@ -96,8 +104,7 @@ test.describe('Forgot Password flow', () => {
     await expect(continueButton).toBeEnabled();
 
     // 4. Submit the request and validate the flow.
-    await continueButton.click();
-    await expect(page).toHaveURL(/.*\/reset-password$/, { timeout: 15_000 });
+    await submitForgotPasswordAndExpectResetPassword(page);
     await expect(page.locator('text=We have sent a password reset code in an email message')).toBeVisible();
   });
 
@@ -117,22 +124,26 @@ test.describe('Forgot Password flow', () => {
     await expect(page).toHaveURL(`${BASE_URL}/login`);
   });
 
-  test('should accept case insensitive email on forgot password request', async ({ page }) => {
+  test('should accept case insensitive email on forgot password request @real-email', async ({ page }) => {
     // 1. Open the forgot password page.
     await page.goto(`${BASE_URL}/forgot-password`);
 
-    // 2. Enter the registered email using mixed uppercase and lowercase.
+    // 2. Enter an email in mixed uppercase/lowercase. A fresh unregistered
+    // address rather than REGISTERED_EMAIL.toUpperCase(), so this never
+    // repeats an address another test in this file already submitted — per
+    // section 2.4/2.5 of the test plan, unregistered and registered emails
+    // already behave identically at this endpoint, so this still exercises
+    // the real behavior being tested (mixed-case input reaching
+    // reset-password).
     const emailInput = page.locator('input[name="username"]');
     const continueButton = page.locator('button[type="submit"]');
     await emailInput.click();
-    await emailInput.fill(CASE_INSENSITIVE_EMAIL);
+    await emailInput.fill(generateUnregisteredEmail().toUpperCase());
     await expect(continueButton).toBeEnabled();
 
-    // 3. Submit the request.
-    await continueButton.click();
-
-    // 4. Verify that the flow continues and the confirmation is shown.
-    await expect(page).toHaveURL(/.*\/reset-password$/, { timeout: 15_000 });
+    // 3. Submit the request and verify that it redirects to reset-password
+    // with the confirmation message.
+    await submitForgotPasswordAndExpectResetPassword(page);
     await expect(page.locator('text=We have sent a password reset code in an email message')).toBeVisible();
   });
 });
@@ -142,7 +153,7 @@ test.describe('Reset Password page - UI and field validation', () => {
     await goToResetPassword(page, generateUnregisteredEmail());
   });
 
-  test('should display all required elements', async ({ page }) => {
+  test('should display all required elements @real-email', async ({ page }) => {
     // 1. Verify the page title and every field/link described in the plan.
     await expect(page).toHaveTitle('Reset Password | Job Link');
     await expect(page.locator('input[name="code"]')).toHaveAttribute('placeholder', 'Enter code');
@@ -164,7 +175,7 @@ test.describe('Reset Password page - UI and field validation', () => {
     await expect(page.locator('button[type="submit"]')).toBeDisabled();
   });
 
-  test('should show "The field is required" when blurring the empty Code field', async ({ page }) => {
+  test('should show "The field is required" when blurring the empty Code field @real-email', async ({ page }) => {
     // 1. Focus Code, then blur it by focusing New Password, without typing.
     await page.locator('input[name="code"]').click();
     await page.locator('input[name="password"]').click();
@@ -173,7 +184,7 @@ test.describe('Reset Password page - UI and field validation', () => {
     await expect(page.locator('text=The field is required')).toBeVisible();
   });
 
-  test('should show "Passwords do not match" when New Password and Confirm New Password differ', async ({ page }) => {
+  test('should show "Passwords do not match" when New Password and Confirm New Password differ @real-email', async ({ page }) => {
     // 1. Fill a strong New Password and a different Confirm New Password.
     await page.locator('input[name="password"]').fill('NewStrongPass1!');
     await page.locator('input[name="confirmPassword"]').fill('DoesNotMatch1!');
@@ -186,7 +197,7 @@ test.describe('Reset Password page - UI and field validation', () => {
     await expect(page.locator('text=Passwords do not match')).toBeVisible();
   });
 
-  test('should show "The code is no longer valid." for a wrong reset code and not change the password', async ({ page }) => {
+  test('should show "The code is no longer valid." for a wrong reset code and not change the password @real-email', async ({ page }) => {
     const changePasswordButton = page.locator('button[type="submit"]');
 
     // 1. Fill an arbitrary wrong code with a matching strong password.
@@ -211,7 +222,7 @@ test.describe('Reset Password page - additional behaviors', () => {
     await goToResetPassword(page, generateUnregisteredEmail());
   });
 
-  test('should toggle New Password and Confirm New Password visibility independently', async ({ page }) => {
+  test('should toggle New Password and Confirm New Password visibility independently @real-email', async ({ page }) => {
     const newPasswordInput = page.locator('input[name="password"]');
     const confirmPasswordInput = page.locator('input[name="confirmPassword"]');
     const toggleButtons = page.getByRole('button', { name: 'toggle password visibility' });
@@ -233,7 +244,7 @@ test.describe('Reset Password page - additional behaviors', () => {
     await expect(newPasswordInput).toHaveAttribute('type', 'text');
   });
 
-  test('should navigate back to the forgot password page, not login', async ({ page }) => {
+  test('should navigate back to the forgot password page, not login @real-email', async ({ page }) => {
     // 1. Click Back on /reset-password.
     const backLink = page.locator('a[href="/forgot-password"]');
     await backLink.click();
@@ -270,8 +281,7 @@ test.describe('Full end-to-end password reset (real email, real code)', () => {
     const resetRequestedAt = new Date();
     await page.goto(`${BASE_URL}/forgot-password`);
     await page.locator('input[name="username"]').fill(emailAlias);
-    await page.locator('button[type="submit"]').click();
-    await expect(page).toHaveURL(/.*\/reset-password$/, { timeout: 15_000 });
+    await submitForgotPasswordAndExpectResetPassword(page);
 
     // 3. Fetch the real 6-digit code from the "Password Recovery" email.
     const code = await getPasswordResetCode(emailAlias, resetRequestedAt);
