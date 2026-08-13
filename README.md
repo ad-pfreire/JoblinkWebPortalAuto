@@ -6,7 +6,11 @@ This README doubles as a living map of the portal: which areas are automated tod
 
 ## Portal Coverage Map
 
-Legend: ✅ automated · 🟡 partially automated · ❌ not automated yet · ❓ exists but not yet explored/located
+Legend: ✅ automated · 🟡 partially automated · ❌ not automated yet
+
+Once logged in, the portal has two top-level tabs: **Company** (the landing page) and **Teams**. Everything below is organized to match that actual navigation — live-verified against pre-staging, not assumed. (An earlier version of this map listed a standalone "Jobs" area; that doesn't exist as a navigable section anywhere in the app — "Add New Jobs" is just one feature bullet inside the Subscription tab's plan-comparison card, see below. Removed to avoid pointing anyone at a page that isn't there.)
+
+### Auth & account
 
 | Area | What's there | Status | Tests |
 |---|---|---|---|
@@ -14,13 +18,26 @@ Legend: ✅ automated · 🟡 partially automated · ❌ not automated yet · �
 | **Account Registration** | Register form + validation, email verification (real link over IMAP), Complete Profile (name, phone, tools/market/role dropdowns) | ✅ | `tests/account-registration.spec.ts` |
 | **Forgot / Reset Password** | Email request page, reset-password page (code + new password, strength checklist), real end-to-end reset with a real emailed code | ✅ | `tests/forgot-password.spec.ts` |
 | **Account Deletion** | Profile → "Delete Account" confirmation dialog and real deletion | ✅ | `tests/forgot-password.spec.ts` |
-| **Company** (`/company`) | Company Details (name, location, email, phone, license) view + edit, Logo upload, Integrations summary card, Payments summary card, Subscription summary card, Payment History table | ❌ | — |
-| **Teams** (`/teams`, `/teams/list`, `/teams/members`) | "For you" / "Teams" / "Members" sub-tabs, Create Team, Invite Member, team member cards | ❌ | — |
 | **Profile Settings** (`/profile`) | First/Last name edit, Phone edit, Change Password, Save | 🟡 (only Delete Account is covered; editing profile fields isn't) | `tests/forgot-password.spec.ts` (deletion only) |
-| **Payments** (`/payments`) | Stripe-hosted Billing Address + Card form, "Redeem Coupon" | ❌ | — |
-| **Subscription** (`/subscription`) | Plan comparison (Free / Job Link Pro / Job Link Pro + Invoicing), Monthly/Yearly toggle, plan change | ❌ | — |
-| **Integrations** | QuickBooks and Calendar, via "Manage integrations" modal on the Company page | ❌ | — |
-| **Jobs** | Referenced as a Pro-plan feature ("Add New Jobs", "Inspection Checklists", "Photos and Notes", "Customer and Equipment History") | ❓ Entry point not yet located in the nav — needs investigating before it can even be planned | — |
+
+### Company (`/company`) — first tab, the landing page after login
+
+Six cards on one page: Company Details and Logo Upload on their own, then Integrations, Payments, and Subscription as summary cards that link out to their own full page/modal, then a Payment History table spanning the bottom.
+
+| Card | What's there | Status | Tests |
+|---|---|---|---|
+| **Company Details** | Read-only view of Company Name, Location, Email, Phone Number, Contractor License, with an "Edit" link (`/company?edit=true`) | ❌ | — |
+| **Logo Upload** | "Upload" button; stated limit "at least 150x150 px and no more than 500KB" | ❌ | — |
+| **Integrations** | Lists QuickBooks and Calendar; "Manage integrations" button opens an in-page modal with a Connect/Manage table, a Status column, and a note that only one work-order tool can be linked at a time | ❌ | — |
+| **Payments** (summary card) | Shows "No Payment Method" when unset; "Manage Payments" link goes to the full **`/payments`** page — Stripe-hosted Billing Address + Card form, "Redeem Coupon" | ❌ | — |
+| **Subscription** (summary card) | Shows current plan name + trial end date; "Manage Subscription" link goes to the full **`/subscription`** page — Free / Job Link Pro / Job Link Pro + Invoicing plan comparison, each listing feature bullets like "Add New Jobs", "Inspection Checklists", "Photos and Notes", "Customer and Equipment History" (marketing copy on the comparison card, not a real in-app "Jobs" section) | ❌ | — |
+| **Payment History** | Table: Status / Date / Title / Amount / Billing ID / Invoice; "No Payment History" placeholder when empty | ❌ | — |
+
+### Teams (`/teams`) — second tab
+
+| Area | What's there | Status | Tests |
+|---|---|---|---|
+| **Teams** | Sub-tabs "For you" / "Teams" / "Members", a "Select Teams & People" search box, "+ Create Team" and "Invite Member" buttons, team cards (`/teams/list`) and member list (`/teams/members`) | ❌ | — |
 
 When picking up new coverage: use the `playwright-test-planner` agent (or manual exploration) to write a plan in `specs/<area>-test-plan.md` first (see [Test plans](#test-plans-specs), then generate/write the spec file, then flip that row's status here.
 
