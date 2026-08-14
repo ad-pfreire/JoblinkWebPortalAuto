@@ -9,6 +9,7 @@ node_modules/
 .claude/settings.local.json
 .playwright-mcp/
 specs/
+handoff.md
 
 # Environment variables
 .env

@@ -18,7 +18,7 @@ Once logged in, the portal has two top-level tabs: **Company** (the landing page
 | **Account Registration** | Register form + validation, email verification (real link over IMAP), Complete Profile (name, phone, tools/market/role dropdowns) | ✅ | `tests/account-registration.spec.ts` |
 | **Forgot / Reset Password** | Email request page, reset-password page (code + new password, strength checklist), real end-to-end reset with a real emailed code | ✅ | `tests/forgot-password.spec.ts` |
 | **Account Deletion** | Profile → "Delete Account" confirmation dialog and real deletion | ✅ | `tests/forgot-password.spec.ts` |
-| **Profile Settings** (`/profile`) | First/Last name edit, Phone edit, Change Password, Save | 🟡 (only Delete Account is covered; editing profile fields isn't) | `tests/forgot-password.spec.ts` (deletion only) |
+| **Profile Settings** (`/profile`) | First/Last name edit + Save, Photo upload/crop, Phone edit, Change Password (modal), Delete Account | ✅ | `tests/profile-settings.spec.ts`, `tests/forgot-password.spec.ts` (real deletion) |
 
 ### Company (`/company`) — first tab, the landing page after login
 
@@ -89,6 +89,7 @@ tests/
   login-cases.spec.ts           Login page: valid/invalid login, validation, visibility toggle, etc.
   account-registration.spec.ts  Registration, email verification, Complete Profile
   forgot-password.spec.ts       Forgot/reset password, account deletion
+  profile-settings.spec.ts      Profile page: name/phone edit, photo upload, Change Password, delete-cancel
   utils/
     env.ts                      requireEnv() — fails fast with a clear message if .env is missing a value
     account.ts                  Shared account lifecycle helpers (register, complete profile) reused across spec files
@@ -123,6 +124,10 @@ Pull requests from forks never receive these secrets (a GitHub security default 
 ### Tagging convention
 
 Any new test that depends on the real pre-staging email pipeline (submitting `/forgot-password`, reading a verification/reset email, etc.) should have ` @real-email` appended to its title, so it's automatically picked up by the "known flaky" step instead of "core".
+
+### Why `profile-settings.spec.ts` runs serial and chromium-only
+
+Unlike every other spec file, most of `profile-settings.spec.ts` reads and mutates the ONE shared seed account (`pfautomation`) that this whole suite also logs in with — Email and Username are read-only on that page, so there's no way to spin up a disposable account for most of its scenarios the way registration/forgot-password do. Running those tests across 3 parallel browser projects (and multiple local workers) would race on that single account's First Name/Phone/Save state and could leave it corrupted for every other spec file. So its `Profile Settings` describe block is `test.describe.configure({ mode: 'serial' })` plus chromium-only (`test.skip(browserName !== 'chromium', ...)`), mirroring the same trade-off `forgot-password.spec.ts` already makes for its own backend-mutating describes, just applied to the whole file instead of one block. The real end-to-end password-change test (5.10) is the one exception — it uses a fresh disposable account like the other files' e2e tests, so it's a separate top-level describe outside the serial block.
 
 ## Known environment issues
 
