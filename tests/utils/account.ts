@@ -63,7 +63,11 @@ export async function registerNewAccount(page: Page, emailAlias: string) {
 // scoped to the phone input's own container (not page-wide .first()) so it
 // keeps resolving to the right element even if the page re-renders and adds
 // other comboboxes earlier in the DOM.
-async function selectPhoneCountry(page: Page, phoneInput: Locator, countryName: string) {
+//
+// Exported so other spec files (e.g. profile-settings.spec.ts) driving the
+// same underlying phone-widget component elsewhere in the app can reuse this
+// exact workaround instead of duplicating it.
+export async function selectPhoneCountry(page: Page, phoneInput: Locator, countryName: string) {
   const countryCombobox = phoneInput.locator('xpath=..').getByRole('combobox');
   await countryCombobox.click();
   await page.evaluate((name: string) => {
@@ -82,7 +86,9 @@ async function selectPhoneCountry(page: Page, phoneInput: Locator, countryName: 
 // selected country. Switching to a different country first forces a real
 // onChange that actually resets the field, then switching back to the
 // target country is itself a real change too, guaranteeing a clean start.
-async function setPhoneNumber(page: Page, phoneInput: Locator, countryName: string, digits: string) {
+//
+// Exported for the same reason as selectPhoneCountry() above.
+export async function setPhoneNumber(page: Page, phoneInput: Locator, countryName: string, digits: string) {
   await selectPhoneCountry(page, phoneInput, 'Mexico');
   await selectPhoneCountry(page, phoneInput, countryName);
   await phoneInput.click();
@@ -118,8 +124,13 @@ export async function completeProfile(page: Page) {
   // triggers the phone-format validation instead of succeeding outright.
   await setPhoneNumber(page, phoneInput, 'United States', '5551234567');
 
+  // Live-verified 2026-08-13: this dropdown's "other" option is currently
+  // labeled "Other / Accessories" — it used to be "Other Tools Not Listed"
+  // (that stale text was silently timing out every test that reached this
+  // step, on every spec file that calls completeProfile(), for who knows
+  // how long before this was caught).
   await page.getByRole('combobox', { name: /Do you currently own any Fieldpiece tools/ }).click();
-  await page.getByRole('option', { name: 'Other Tools Not Listed' }).click();
+  await page.getByRole('option', { name: 'Other / Accessories' }).click();
   await page.keyboard.press('Escape');
 
   await page.getByRole('combobox', { name: /What market\(s\) do you serve/ }).click();
