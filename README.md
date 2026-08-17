@@ -26,7 +26,7 @@ Six cards on one page: Company Details and Logo Upload on their own, then Integr
 
 | Card | What's there | Status | Tests |
 |---|---|---|---|
-| **Company Details** | Read-only view of Company Name, Location, Email, Phone Number, Contractor License, with an "Edit" link (`/company?edit=true`) | ❌ | — |
+| **Company Details** | Read-only view of Company Name, Location, Email, Phone Number, Contractor License, with an "Edit" link (`/company?edit=true`) — the edit form has 13 fields, 8 more than the read view shows | ✅ | `tests/company-details.spec.ts` |
 | **Logo Upload** | "Upload" button; stated limit "at least 150x150 px and no more than 500KB" | ✅ | `tests/logo-upload.spec.ts` |
 | **Integrations** | Lists QuickBooks and Calendar; "Manage integrations" button opens an in-page modal with a Connect/Manage table, a Status column, and a note that only one work-order tool can be linked at a time | ❌ | — |
 | **Payments** (summary card) | Shows "No Payment Method" when unset; "Manage Payments" link goes to the full **`/payments`** page — Stripe-hosted Billing Address + Card form, "Redeem Coupon" | ❌ | — |
@@ -97,6 +97,7 @@ tests/
   forgot-password.spec.ts       Forgot/reset password, account deletion
   profile-settings.spec.ts      Profile page: name/phone edit, photo upload, Change Password, delete-cancel
   logo-upload.spec.ts           Company page Logo Upload card: valid upload/replace, size/dimension validation, error dialog behavior
+  company-details.spec.ts       Company page Company Details card: read view, edit form, validation, save/persistence, cancel/discard
   utils/
     env.ts                      requireEnv() — fails fast with a clear message if .env is missing a value
     account.ts                  Shared account lifecycle helpers (register, complete profile) reused across spec files
@@ -132,11 +133,13 @@ Pull requests from forks never receive these secrets (a GitHub security default 
 
 Any new test that depends on the real pre-staging email pipeline (submitting `/forgot-password`, reading a verification/reset email, etc.) should have ` @real-email` appended to its title, so it's automatically picked up by the "known flaky" step instead of "core".
 
-### Why `profile-settings.spec.ts` and `logo-upload.spec.ts` run serial and chromium-only
+### Why `profile-settings.spec.ts`, `logo-upload.spec.ts`, and `company-details.spec.ts` run serial and chromium-only
 
 Unlike every other spec file, most of `profile-settings.spec.ts` reads and mutates the ONE shared seed account (`pfautomation`) that this whole suite also logs in with — Email and Username are read-only on that page, so there's no way to spin up a disposable account for most of its scenarios the way registration/forgot-password do. Running those tests across 3 parallel browser projects (and multiple local workers) would race on that single account's First Name/Phone/Save state and could leave it corrupted for every other spec file. So its `Profile Settings` describe block is `test.describe.configure({ mode: 'serial' })` plus chromium-only (`test.skip(browserName !== 'chromium', ...)`), mirroring the same trade-off `forgot-password.spec.ts` already makes for its own backend-mutating describes, just applied to the whole file instead of one block. The real end-to-end password-change test (5.10) is the one exception — it uses a fresh disposable account like the other files' e2e tests, so it's a separate top-level describe outside the serial block.
 
 `logo-upload.spec.ts` follows the identical pattern for the same reason: the same seed account's one company logo is shared, mutable, order-dependent state (test 2.2, for example, explicitly depends on test 2.1's upload already being saved) — there's no per-scenario disposable-company escape hatch here either.
+
+`company-details.spec.ts` follows the same pattern too, for the same shared-account reason. One additional wrinkle worth knowing: Company Details' required fields (Company Name, Contractor License, Country, Address, Address 2, City, Zip Code, Email, Mobile Phone Number) can never be cleared back to empty and saved — that's normal required-field validation, not a bug — so unlike Logo Upload's logo, there is no path to restore this card to its original blank "-" placeholder state once any field has held a real value. The seed account's Company Details now permanently show harmless, clearly-labeled QA test values (Company Name "QA Automation Test Co", etc.) instead of "-" — a one-time, accepted, permanent side effect of this area's exploration, mirroring the same trade-off already accepted for Logo Upload.
 
 ## Known environment issues
 
