@@ -27,7 +27,7 @@ Six cards on one page: Company Details and Logo Upload on their own, then Integr
 | Card | What's there | Status | Tests |
 |---|---|---|---|
 | **Company Details** | Read-only view of Company Name, Location, Email, Phone Number, Contractor License, with an "Edit" link (`/company?edit=true`) | ❌ | — |
-| **Logo Upload** | "Upload" button; stated limit "at least 150x150 px and no more than 500KB" | ❌ | — |
+| **Logo Upload** | "Upload" button; stated limit "at least 150x150 px and no more than 500KB" | ✅ | `tests/logo-upload.spec.ts` |
 | **Integrations** | Lists QuickBooks and Calendar; "Manage integrations" button opens an in-page modal with a Connect/Manage table, a Status column, and a note that only one work-order tool can be linked at a time | ❌ | — |
 | **Payments** (summary card) | Shows "No Payment Method" when unset; "Manage Payments" link goes to the full **`/payments`** page — Stripe-hosted Billing Address + Card form, "Redeem Coupon" | ❌ | — |
 | **Subscription** (summary card) | Shows current plan name + trial end date; "Manage Subscription" link goes to the full **`/subscription`** page — Free / Job Link Pro / Job Link Pro + Invoicing plan comparison, each listing feature bullets like "Add New Jobs", "Inspection Checklists", "Photos and Notes", "Customer and Equipment History" (marketing copy on the comparison card, not a real in-app "Jobs" section) | ❌ | — |
@@ -61,6 +61,12 @@ When picking up new coverage: use the `playwright-test-planner` agent (or manual
    - `GMAIL_IMAP_USER` / `GMAIL_IMAP_APP_PASSWORD` — a Gmail **App Password** (not your normal Gmail password), generated at https://myaccount.google.com/apppasswords. Used only to read verification/reset emails over IMAP.
    - **`.env` is gitignored and must never be committed.**
 
+### If you're a second person picking this up: use your own seed account
+
+`TEST_USERNAME`/`TEST_LOGIN_PASSWORD` don't have to point at the maintainer's `pfautomation` account — the suite discovers that account's current name/phone/etc. at runtime rather than assuming fixed values (see `discoverSeedBaseline()` in `tests/profile-settings.spec.ts`), so it works against **any** seed account's existing state, sight unseen.
+
+What it can't do is coordinate across two different people's machines. `profile-settings.spec.ts` and `logo-upload.spec.ts` mutate their seed account's real state mid-test (name, phone, logo) before restoring it — if two people ran these files against the **same** account credentials at the same time, both from their own laptops, they'd race on that shared state with no way for either side to know the other is running (this is different from the parallel-workers race those files already guard against internally with `mode: 'serial'` + chromium-only, and different from two *CI* runs racing, which the `concurrency` group in `.github/workflows/playwright.yml` already serializes). So: **register your own separate test account** on pre-staging and put its credentials in your own `.env`, rather than reusing someone else's `TEST_USERNAME`. CI's shared secrets are a special case already handled by that `concurrency` group — this only matters for two humans running locally.
+
 ## Running tests
 
 ```bash
@@ -90,6 +96,7 @@ tests/
   account-registration.spec.ts  Registration, email verification, Complete Profile
   forgot-password.spec.ts       Forgot/reset password, account deletion
   profile-settings.spec.ts      Profile page: name/phone edit, photo upload, Change Password, delete-cancel
+  logo-upload.spec.ts           Company page Logo Upload card: valid upload/replace, size/dimension validation, error dialog behavior
   utils/
     env.ts                      requireEnv() — fails fast with a clear message if .env is missing a value
     account.ts                  Shared account lifecycle helpers (register, complete profile) reused across spec files
@@ -125,9 +132,11 @@ Pull requests from forks never receive these secrets (a GitHub security default 
 
 Any new test that depends on the real pre-staging email pipeline (submitting `/forgot-password`, reading a verification/reset email, etc.) should have ` @real-email` appended to its title, so it's automatically picked up by the "known flaky" step instead of "core".
 
-### Why `profile-settings.spec.ts` runs serial and chromium-only
+### Why `profile-settings.spec.ts` and `logo-upload.spec.ts` run serial and chromium-only
 
 Unlike every other spec file, most of `profile-settings.spec.ts` reads and mutates the ONE shared seed account (`pfautomation`) that this whole suite also logs in with — Email and Username are read-only on that page, so there's no way to spin up a disposable account for most of its scenarios the way registration/forgot-password do. Running those tests across 3 parallel browser projects (and multiple local workers) would race on that single account's First Name/Phone/Save state and could leave it corrupted for every other spec file. So its `Profile Settings` describe block is `test.describe.configure({ mode: 'serial' })` plus chromium-only (`test.skip(browserName !== 'chromium', ...)`), mirroring the same trade-off `forgot-password.spec.ts` already makes for its own backend-mutating describes, just applied to the whole file instead of one block. The real end-to-end password-change test (5.10) is the one exception — it uses a fresh disposable account like the other files' e2e tests, so it's a separate top-level describe outside the serial block.
+
+`logo-upload.spec.ts` follows the identical pattern for the same reason: the same seed account's one company logo is shared, mutable, order-dependent state (test 2.2, for example, explicitly depends on test 2.1's upload already being saved) — there's no per-scenario disposable-company escape hatch here either.
 
 ## Known environment issues
 

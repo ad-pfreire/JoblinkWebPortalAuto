@@ -15,27 +15,64 @@ const SEED_USERNAME = requireEnv('TEST_USERNAME');
 const SEED_PASSWORD = requireEnv('TEST_LOGIN_PASSWORD');
 const SEED_EMAIL = `${requireEnv('TEST_EMAIL_USER')}+automation${requireEnv('TEST_EMAIL_DOMAIN')}`;
 
-// The seed account's known-good baseline values (specs/profile-settings-test-plan.md
-// section "Application Overview"). Every test that dirties one of these fields
-// restores it before finishing, so the suite always starts the next test from
-// this same baseline, and so the OTHER spec files that also depend on this
-// shared account (login-cases.spec.ts, account-registration.spec.ts,
-// forgot-password.spec.ts) are never left broken by this file.
-const SEED_FIRST_NAME = 'QA';
-const SEED_LAST_NAME = 'Automation';
-const SEED_PHONE_DIGITS = '2125550100';
-const SEED_PHONE_FORMATTED = '+1 (212) 555-0100';
+// The seed account's baseline values - NOT hardcoded. Portability: this
+// suite is meant to run against whatever seed account a given developer/CI
+// environment has configured in .env (TEST_USERNAME/TEST_LOGIN_PASSWORD),
+// not specifically the maintainer's own pfautomation account. A different
+// account almost certainly has a different name/phone already set, so
+// hardcoding literal expected values here (as this file used to) would make
+// it fail immediately against anyone else's seed account. Instead,
+// discoverSeedBaseline() below reads whatever these fields ACTUALLY are on
+// first run and uses that as the "restore point" every test returns to -
+// works with any seed account's current state, sight unseen.
+let SEED_FIRST_NAME: string;
+let SEED_LAST_NAME: string;
+let SEED_PHONE_FORMATTED: string;
+let SEED_PHONE_DIGITS: string;
 
-// Logs in as the shared seed account and lands on /profile. Used as the
-// common starting point for every test below.
-async function loginAsSeedAndGoToProfile(page: Page) {
+// Logs in as the shared seed account and lands on /profile, without
+// asserting anything about the name fields' values - used both by
+// discoverSeedBaseline() (before those values are known) and by
+// loginAsSeedAndGoToProfile() below (after they are).
+async function loginAsSeed(page: Page) {
   await page.goto(`${BASE_URL}/login`);
   await page.locator('input[name="username"]').fill(SEED_USERNAME);
   await page.locator('input[name="password"]').fill(SEED_PASSWORD);
   await page.locator('button[type="submit"]').click();
   await expect(page).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
   await page.goto(`${BASE_URL}/profile`);
+  await expect(page.locator('input[name="firstName"]')).not.toHaveValue('');
+}
+
+// Logs in as the shared seed account and lands on /profile, then confirms
+// the page shows the discovered baseline first name - a sanity check, at
+// the start of every test, that the account is in the same restored state
+// this suite left it in (not a check against a fixed literal anymore, see
+// SEED_FIRST_NAME above).
+async function loginAsSeedAndGoToProfile(page: Page) {
+  await loginAsSeed(page);
   await expect(page.locator('input[name="firstName"]')).toHaveValue(SEED_FIRST_NAME);
+}
+
+// Runs once before any test in this file: logs in, reads whatever this seed
+// account's First Name / Last Name / Phone Number currently are, and uses
+// those as SEED_FIRST_NAME/SEED_LAST_NAME/SEED_PHONE_FORMATTED/
+// SEED_PHONE_DIGITS for the rest of the file. Phone digits are extracted
+// from the formatted display value (e.g. "+1 (212) 555-0100" ->
+// "2125550100") by stripping non-digits and dropping a leading US country
+// code "1" if present, since setPhoneNumber() (tests/utils/account.ts)
+// takes bare local digits with the country selected separately - this
+// assumes a US-formatted number, consistent with every phone-editing test
+// in this file already hardcoding country 'United States'.
+async function discoverSeedBaseline(browser: import('@playwright/test').Browser) {
+  const page = await browser.newPage();
+  await loginAsSeed(page);
+  SEED_FIRST_NAME = await page.locator('input[name="firstName"]').inputValue();
+  SEED_LAST_NAME = await page.locator('input[name="lastName"]').inputValue();
+  SEED_PHONE_FORMATTED = await page.getByRole('textbox', { name: 'Phone Number' }).inputValue();
+  const digitsWithCountryCode = SEED_PHONE_FORMATTED.replace(/\D/g, '');
+  SEED_PHONE_DIGITS = digitsWithCountryCode.length === 11 && digitsWithCountryCode.startsWith('1') ? digitsWithCountryCode.slice(1) : digitsWithCountryCode;
+  await page.close();
 }
 
 // Clicks Save and waits for the real POST /profile response, rather than
@@ -146,6 +183,10 @@ async function injectTextFile(page: Page, fileName: string, content: string) {
 // to the whole file instead of a single block.
 test.describe('Profile Settings', () => {
   test.describe.configure({ mode: 'serial' });
+
+  test.beforeAll(async ({ browser }) => {
+    await discoverSeedBaseline(browser);
+  });
 
   test.beforeEach(async ({ page, browserName }) => {
     test.skip(browserName !== 'chromium', 'Shared seed account state; runs once serially on chromium to avoid cross-project races on the same account.');

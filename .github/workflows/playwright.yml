@@ -4,6 +4,19 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
+# Every run of this workflow, on every branch/PR, hits the SAME shared seed
+# account (TEST_USERNAME/TEST_LOGIN_PASSWORD secrets) - two overlapping runs
+# (e.g. two PRs pushed close together) would race on that one account's
+# state, the same class of problem documented in CLAUDE.md for local MCP
+# sessions and parallel workers, just at the CI-run level instead. A single,
+# branch-independent group name means at most one run touches the seed
+# account at a time; cancel-in-progress is deliberately false (queue, don't
+# cancel) because killing a run mid-test could skip its own cleanup/restore
+# step (e.g. profile-settings.spec.ts restoring First Name/Phone), leaving
+# the shared account corrupted for whichever run goes next.
+concurrency:
+  group: playwright-suite-seed-account
+  cancel-in-progress: false
 jobs:
   test:
     timeout-minutes: 60
