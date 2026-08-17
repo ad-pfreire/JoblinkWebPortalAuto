@@ -786,7 +786,12 @@ test.describe('Company Details', () => {
       // which doesn't exist on /company?edit=true.
       expect(cardPhoneNumberText).not.toBe(officePhoneValue);
       await page.goto(`${BASE_URL}/company`);
-      if (officePhoneValue) {
+      // Guard against a bare, digit-less country code (e.g. '+1' with no
+      // number entered) - Office Phone Number is optional and can be unset
+      // on the seed account, and a bare '+1' is trivially a substring of
+      // any US Mobile Phone Number the card legitimately does show, which
+      // would make this check fail on a false positive.
+      if (officePhoneValue.replace(/\D/g, '').length > 1) {
         await expect(card).not.toContainText(officePhoneValue);
       }
     });
