@@ -115,7 +115,20 @@ async function resolveStripeFrameByContent(page: Page, iframeTitle: string, expe
 // switches between textbox/combobox depending on the selected country), so
 // it's a safe, always-present field to probe for.
 async function billingAddressFrame(page: Page) {
-  return resolveStripeFrameByContent(page, 'Secure address input frame', 'Full name');
+  const frame = await resolveStripeFrameByContent(page, 'Secure address input frame', 'Full name');
+  // 'Full name' being present doesn't guarantee the REST of this widget has
+  // finished mounting - live-verified in CI (a GitHub Actions runner is
+  // slower/more resource-constrained than a local dev machine): a run hung
+  // a full 90s on 'Address line 1' immediately after this exact resolver
+  // had just confirmed the same frame already contained 'Full name'. Never
+  // reproduced locally across ~20 full-file runs, only in CI, consistent
+  // with a genuinely slower environment exposing a progressive-mount gap
+  // that's too narrow to hit on a faster machine. Waiting on Address line
+  // 1's own stable Stripe element id (role-agnostic, since its role
+  // switches between textbox/combobox by country) before returning closes
+  // that gap without depending on which role it currently has.
+  await frame.locator('#billingAddress-addressLine1Input').waitFor({ state: 'attached', timeout: 15_000 });
+  return frame;
 }
 
 // Same reasoning as billingAddressFrame() above, for the separate Card
