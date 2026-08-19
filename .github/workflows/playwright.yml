@@ -19,7 +19,16 @@ concurrency:
   cancel-in-progress: false
 jobs:
   test:
-    timeout-minutes: 60
+    # Was 60 - the run right after tests/payments.spec.ts (30 tests, several
+    # genuinely slow real flows: 3D Secure, a real Stripe Checkout
+    # subscription purchase) was added got hard-killed by this cap ("The job
+    # has exceeded the maximum execution time of 1h0m0s", not a test
+    # failure) rather than completing with a pass/fail verdict. The
+    # pre-Payments "core" step alone already ran ~21m locally-equivalent: 90
+    # gives real headroom for the larger suite plus this file's own
+    # real-email-dependent beforeAll occasionally needing its full retry
+    # budget under degraded pre-staging email delivery.
+    timeout-minutes: 90
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
