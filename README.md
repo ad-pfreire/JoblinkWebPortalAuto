@@ -29,7 +29,7 @@ Six cards on one page: Company Details and Logo Upload on their own, then Integr
 | **Company Details** | Read-only view of Company Name, Location, Email, Phone Number, Contractor License, with an "Edit" link (`/company?edit=true`) — the edit form has 13 fields, 8 more than the read view shows | ✅ | `tests/company-details.spec.ts` |
 | **Logo Upload** | "Upload" button; stated limit "at least 150x150 px and no more than 500KB" | ✅ | `tests/logo-upload.spec.ts` |
 | **Integrations** | Lists QuickBooks and Calendar; "Manage integrations" button opens an in-page modal with a Connect/Manage table, a Status column, and a note that only one work-order tool can be linked at a time | ❌ | — |
-| **Payments** (summary card) | Shows "No Payment Method" when unset; "Manage Payments" link goes to the full **`/payments`** page — Stripe-hosted Billing Address + Card form, "Redeem Coupon" | ❌ | — |
+| **Payments** (summary card) | Shows "No Payment Method" when unset; "Manage Payments" link goes to the full **`/payments`** page — Stripe-hosted Billing Address + Card form, "Redeem Coupon" | ✅ | `tests/payments.spec.ts` |
 | **Subscription** (summary card) | Shows current plan name + trial end date; "Manage Subscription" link goes to the full **`/subscription`** page — Free / Job Link Pro / Job Link Pro + Invoicing plan comparison, each listing feature bullets like "Add New Jobs", "Inspection Checklists", "Photos and Notes", "Customer and Equipment History" (marketing copy on the comparison card, not a real in-app "Jobs" section) | ❌ | — |
 | **Payment History** | Table: Status / Date / Title / Amount / Billing ID / Invoice; "No Payment History" placeholder when empty | ❌ | — |
 
