@@ -424,7 +424,7 @@ test.describe('Payments', () => {
   });
 
   test.describe('Payments — Summary Card (/company)', () => {
-    test("1.1 Fresh company shows 'No Payment Method' on the summary card with a working 'Manage Payments' link to /payments", async ({ page }) => {
+    test("1.1 Fresh company shows 'No Payment Method' on the summary card with a working 'Manage Payments' link to /payments @real-email", async ({ page }) => {
       // 1. Log in with a fresh/disposable, profile-complete account whose
       // company has never had a payment method, and land on /company (done
       // by beforeEach) - this is the first test in this file to touch
@@ -468,7 +468,7 @@ test.describe('Payments', () => {
       await expect(page.getByText('Billing Address', { exact: true })).toBeVisible();
     });
 
-    test("1.2 After a payment method is saved, the summary card's masked card and expiry exactly match /payments' 'Current Payment Method' block", async ({ page }) => {
+    test("1.2 After a payment method is saved, the summary card's masked card and expiry exactly match /payments' 'Current Payment Method' block @real-email", async ({ page }) => {
       // Real, multi-iframe Stripe Elements interaction (character-by-character
       // keystrokes across three separate iframes, per this project's Stripe
       // Elements gotcha) plus a genuine SetupIntent confirmation + backend
@@ -522,7 +522,7 @@ test.describe('Payments', () => {
   });
 
   test.describe('Payments — Page Structure, Empty State, and Country-Dependent Form Behavior', () => {
-    test('2.1 /payments page structure inventory on a company with no payment method', async ({ page }) => {
+    test('2.1 /payments page structure inventory on a company with no payment method @real-email', async ({ page }) => {
       // 1. Navigate to /payments directly on a company with no payment
       // method saved. Test 1.2 above (this describe runs serially, sharing
       // one disposable company across every test in the file) left a
@@ -611,7 +611,7 @@ test.describe('Payments', () => {
       expect(await rewardsCard.innerText()).toBe('Rewards & Balances\nRedeem Coupon');
     });
 
-    test("2.2 Country defaults to 'Ecuador' on every fresh page load, with a plain (non-autocomplete) Address field and no State/Province field at that default", async ({ page }) => {
+    test("2.2 Country defaults to 'Ecuador' on every fresh page load, with a plain (non-autocomplete) Address field and no State/Province field at that default @real-email", async ({ page }) => {
       // 1. On a fresh /payments load (before touching the Country
       // dropdown), inspect the Billing Address iframe's 'Country or
       // region' dropdown and the shape of the address fields below it.
@@ -636,7 +636,7 @@ test.describe('Payments', () => {
       await expect(addressFrame.getByText('Province', { exact: true })).toHaveCount(0);
     });
 
-    test("2.3 Selecting 'United States' reshapes the Billing Address form: Address becomes an autocomplete combobox, adds a 'State' dropdown, and relabels 'Postal code' to 'ZIP code'", async ({ page }) => {
+    test("2.3 Selecting 'United States' reshapes the Billing Address form: Address becomes an autocomplete combobox, adds a 'State' dropdown, and relabels 'Postal code' to 'ZIP code' @real-email", async ({ page }) => {
       // 1. On a fresh /payments load, select 'United States' from the
       // 'Country or region' dropdown inside the Billing Address iframe -
       // deliberately never typing into the resulting Address combobox nor
@@ -669,7 +669,7 @@ test.describe('Payments', () => {
       await expect(addressFrame.getByText('City', { exact: true })).toBeVisible();
     });
 
-    test("2.4 Selecting 'Canada' reshapes the form differently from United States: adds a 'Province' dropdown (not 'State') and does NOT relabel the postal field", async ({ page }) => {
+    test("2.4 Selecting 'Canada' reshapes the form differently from United States: adds a 'Province' dropdown (not 'State') and does NOT relabel the postal field @real-email", async ({ page }) => {
       // 1. On a fresh /payments load, select 'Canada' from the 'Country or
       // region' dropdown.
       await page.goto(`${BASE_URL}/payments`);
@@ -688,7 +688,7 @@ test.describe('Payments', () => {
       await expect(addressFrame.getByText('ZIP code', { exact: true })).toHaveCount(0);
     });
 
-    test("2.5 Selecting 'France' shows an autocomplete Address field but NO state/province field at all", async ({ page }) => {
+    test("2.5 Selecting 'France' shows an autocomplete Address field but NO state/province field at all @real-email", async ({ page }) => {
       // 1. On a fresh /payments load, select 'France' from the 'Country or
       // region' dropdown.
       await page.goto(`${BASE_URL}/payments`);
@@ -708,7 +708,7 @@ test.describe('Payments', () => {
       await expect(addressFrame.getByText('Postal code', { exact: true })).toBeVisible();
     });
 
-    test('2.6 Auth guard: accessing /payments directly while logged out redirects to /login with a redirectUrl, and logging in from that state lands back on /payments', async ({ page }) => {
+    test('2.6 Auth guard: accessing /payments directly while logged out redirects to /login with a redirectUrl, and logging in from that state lands back on /payments @real-email', async ({ page }) => {
       // 1. While logged in (done by beforeEach via
       // loginAsDisposableAndGoToCompany, landing on /company), log out via
       // the account menu (avatar button -> 'Log Out').
@@ -740,7 +740,7 @@ test.describe('Payments', () => {
   });
 
   test.describe('Payments — Rewards & Balances / Coupon Code', () => {
-    test("3.1 Entering a realistic-looking coupon code and clicking 'Redeem Coupon' fires zero network requests and shows no success/error message (expected — feature not yet enabled)", async ({ page }) => {
+    test("3.1 Entering a realistic-looking coupon code and clicking 'Redeem Coupon' fires zero network requests and shows no success/error message (expected — feature not yet enabled) @real-email", async ({ page }) => {
       // 1. On /payments, type a plausible coupon code (e.g. 'TESTCOUPON123')
       // into the 'Coupon Code' field, then click 'Redeem Coupon'. Per the
       // maintainer (see specs/payments-test-plan.md section 3), Redeem
@@ -792,7 +792,7 @@ test.describe('Payments', () => {
       await expect(couponInput).toHaveValue('TESTCOUPON123');
     });
 
-    test('3.2 A whitespace-only Coupon Code value produces the identical no-op behavior', async ({ page }) => {
+    test('3.2 A whitespace-only Coupon Code value produces the identical no-op behavior @real-email', async ({ page }) => {
       // 1. Clear the 'Coupon Code' field and type only whitespace (e.g.
       // three spaces), then click 'Redeem Coupon'.
       // See test 3.1's comment above for why this waits for the specific
@@ -815,7 +815,7 @@ test.describe('Payments', () => {
       await expect(page.getByRole('alert')).toHaveText('');
     });
 
-    test('3.3 A very long Coupon Code value (128 characters) is accepted with no truncation, and still produces the same no-op behavior on click', async ({ page }) => {
+    test('3.3 A very long Coupon Code value (128 characters) is accepted with no truncation, and still produces the same no-op behavior on click @real-email', async ({ page }) => {
       // 1. Clear the 'Coupon Code' field and type a 128-character repeating
       // string.
       // See test 3.1's comment above for why this waits for the specific
@@ -848,7 +848,7 @@ test.describe('Payments', () => {
       await expect(page.getByRole('alert')).toHaveText('');
     });
 
-    test("3.4 KNOWN LIMITATION: Redeem Coupon is not enabled in this release, so its success/error paths cannot be tested yet", async ({ page }) => {
+    test("3.4 KNOWN LIMITATION: Redeem Coupon is not enabled in this release, so its success/error paths cannot be tested yet @real-email", async ({ page }) => {
       // Documentation-style consolidation test, not a new behavior to
       // discover: per the maintainer, 'Redeem Coupon' is intentionally not
       // wired up to any backend endpoint yet in this release (planned for a
@@ -883,7 +883,7 @@ test.describe('Payments', () => {
   });
 
   test.describe('Payments — Card Form Validation and the Save Payment Details Checkbox Requirement', () => {
-    test("4.1 Stripe's own real-time card validation shows specific inline error messages for incomplete/invalid Card fields", async ({ page }) => {
+    test("4.1 Stripe's own real-time card validation shows specific inline error messages for incomplete/invalid Card fields @real-email", async ({ page }) => {
       // 1. In the Card iframe, type an incomplete card number (e.g. '4242')
       // and blur the field by clicking into 'Expiration date'.
       //
@@ -946,7 +946,7 @@ test.describe('Payments', () => {
       await expect(page.getByRole('button', { name: 'Update Payment Method' })).toBeDisabled();
     });
 
-    test("4.2 The 'Save payment details for future purchases' checkbox genuinely gates the 'Update Payment Method' button — clearing it alone disables the button even when every other field is valid", async ({
+    test("4.2 The 'Save payment details for future purchases' checkbox genuinely gates the 'Update Payment Method' button — clearing it alone disables the button even when every other field is valid @real-email", async ({
       page,
     }) => {
       // 1. Fill Full Name, Address/City/Postal (default country, plain text
@@ -970,7 +970,7 @@ test.describe('Payments', () => {
       await expect(updateButton).toBeEnabled();
     });
 
-    test("4.3 NOTABLE INCONSISTENCY: unlike the checkbox, clearing 'Full Name' does NOT re-disable the 'Update Payment Method' button — the missing-field block only surfaces at submit-click time via Stripe's own client-side validation, with no API call made", async ({
+    test("4.3 NOTABLE INCONSISTENCY: unlike the checkbox, clearing 'Full Name' does NOT re-disable the 'Update Payment Method' button — the missing-field block only surfaces at submit-click time via Stripe's own client-side validation, with no API call made @real-email", async ({
       page,
     }) => {
       // 1. Fill every field EXCEPT 'Full Name' (Address/City/Postal, valid
@@ -1039,7 +1039,7 @@ test.describe('Payments', () => {
       await expect(page).toHaveURL(`${BASE_URL}/payments`);
     });
 
-    test('4.4 The same button-stays-enabled-but-blocks-on-submit pattern generalizes to other Address fields (spot-checked with City)', async ({ page }) => {
+    test('4.4 The same button-stays-enabled-but-blocks-on-submit pattern generalizes to other Address fields (spot-checked with City) @real-email', async ({ page }) => {
       // 1. Fill every field EXCEPT 'City' (Full Name/Address/Postal, valid
       // Card fields, checkbox checked), leaving City genuinely blank from
       // the start - see 4.3's comment above for why this is deliberately
@@ -1069,7 +1069,7 @@ test.describe('Payments', () => {
       await expect(page).toHaveURL(`${BASE_URL}/payments`);
     });
 
-    test("4.5 No client-side maximum length is enforced on 'Full Name', at least up to 298 characters", async ({ page }) => {
+    test("4.5 No client-side maximum length is enforced on 'Full Name', at least up to 298 characters @real-email", async ({ page }) => {
       // 1. Type a 298-character value into 'Full Name'.
       await page.goto(`${BASE_URL}/payments`);
       const addressFrame = await billingAddressFrame(page);
@@ -1084,7 +1084,7 @@ test.describe('Payments', () => {
       expect((await fullNameField.inputValue()).length).toBe(298);
     });
 
-    test("4.6 EXCEPTION to the 4.3/4.4 pattern: 'Postal code' is genuinely NOT a required field — a submission with it blank succeeds outright, with no blocking validation of any kind", async ({
+    test("4.6 EXCEPTION to the 4.3/4.4 pattern: 'Postal code' is genuinely NOT a required field — a submission with it blank succeeds outright, with no blocking validation of any kind @real-email", async ({
       page,
     }) => {
       // Real Stripe SetupIntent confirmation + backend save round-trip, same
@@ -1117,7 +1117,7 @@ test.describe('Payments', () => {
       await expect(card.getByText('No Payment Method')).toHaveCount(0);
     });
 
-    test("4.7 A very long value in 'Address line 1' (257 characters) does not visually overflow or break the Billing Address form's layout", async ({ page }) => {
+    test("4.7 A very long value in 'Address line 1' (257 characters) does not visually overflow or break the Billing Address form's layout @real-email", async ({ page }) => {
       // 1. Type a 257-character value into 'Address line 1' and inspect the
       // field and surrounding form.
       await page.goto(`${BASE_URL}/payments`);
@@ -1146,7 +1146,7 @@ test.describe('Payments', () => {
   });
 
   test.describe('Payments — Successful Save, Decline, and 3D Secure Flows', () => {
-    test("5.1 A fully valid submission (test card 4242, valid address, checkbox checked) redirects to /company, updates the summary card, and leaves Payment History unchanged — persisting across a real reload", async ({
+    test("5.1 A fully valid submission (test card 4242, valid address, checkbox checked) redirects to /company, updates the summary card, and leaves Payment History unchanged — persisting across a real reload @real-email", async ({
       page,
     }) => {
       // Real, multi-iframe Stripe Elements interaction plus a genuine
@@ -1225,7 +1225,7 @@ test.describe('Payments', () => {
       await expect(page.getByRole('heading', { name: '12/2034', exact: true })).toBeVisible();
     });
 
-    test('5.2 Decline flow (test card 4000 0000 0000 0002) shows three simultaneous error surfaces and leaves the form editable for immediate retry', async ({ page }) => {
+    test('5.2 Decline flow (test card 4000 0000 0000 0002) shows three simultaneous error surfaces and leaves the form editable for immediate retry @real-email', async ({ page }) => {
       // Real, multi-iframe Stripe Elements interaction plus a genuine
       // Stripe decline round-trip (live-verified to take several seconds
       // longer than a successful confirm) - comfortably exceeds the default
@@ -1299,7 +1299,7 @@ test.describe('Payments', () => {
       await expect((await cardElementFrame(page)).getByRole('textbox', { name: 'Card number' })).toHaveValue('4000 0000 0000 0002');
     });
 
-    test('5.3 Incorrect-CVC decline (test card 4000 0000 0000 0127) surfaces a CVC-SPECIFIC error message, distinct from the generic decline message', async ({ page }) => {
+    test('5.3 Incorrect-CVC decline (test card 4000 0000 0000 0127) surfaces a CVC-SPECIFIC error message, distinct from the generic decline message @real-email', async ({ page }) => {
       // Same real Stripe decline round-trip budget concern as 5.2 above.
       test.slow();
 
@@ -1342,7 +1342,7 @@ test.describe('Payments', () => {
       await expect((await cardElementFrame(page)).getByRole('textbox', { name: 'Card number' })).toHaveValue('4000 0000 0000 0127');
     });
 
-    test('5.4 3D Secure authentication flow (test card 4000 0025 0000 3155) shows a real Stripe-hosted challenge modal, and completing it successfully saves the card', async ({
+    test('5.4 3D Secure authentication flow (test card 4000 0025 0000 3155) shows a real Stripe-hosted challenge modal, and completing it successfully saves the card @real-email', async ({
       page,
     }) => {
       // Real, multi-iframe Stripe Elements interaction plus a genuine 3D
@@ -1430,7 +1430,7 @@ test.describe('Payments', () => {
   });
 
   test.describe('Payments — Replacing and Deleting a Payment Method', () => {
-    test("6.1 With a payment method already saved, the Billing Address/Card form still renders below 'Current Payment Method' and starts blank (does not prefill the previously-saved billing address)", async ({ page }) => {
+    test("6.1 With a payment method already saved, the Billing Address/Card form still renders below 'Current Payment Method' and starts blank (does not prefill the previously-saved billing address) @real-email", async ({ page }) => {
       // Reads 9 separate fields across 2 separate Stripe iframes, each
       // resolved fresh via resolveStripeFrameByContent()'s own up-to-15s
       // polling budget - live-verified this can add up close to the
@@ -1502,7 +1502,7 @@ test.describe('Payments', () => {
       await expect(page.getByRole('button', { name: 'Update Payment Method' })).toBeDisabled();
     });
 
-    test("6.2 Submitting this still-visible form with a different card, without clicking 'Delete Payment Method' first, replaces the existing payment method — expected behavior of the 'Update Payment Method' button", async ({
+    test("6.2 Submitting this still-visible form with a different card, without clicking 'Delete Payment Method' first, replaces the existing payment method — expected behavior of the 'Update Payment Method' button @real-email", async ({
       page,
     }) => {
       // Real, multi-iframe Stripe Elements interaction plus a genuine
@@ -1559,7 +1559,7 @@ test.describe('Payments', () => {
       await expect(page.getByRole('heading', { name: '**** **** **** 3155' })).toHaveCount(0);
     });
 
-    test("6.3 'Delete Payment Method' opens a confirmation dialog with specific copy, and 'No, go back' cancels cleanly without deleting anything (no active subscription case)", async ({ page }) => {
+    test("6.3 'Delete Payment Method' opens a confirmation dialog with specific copy, and 'No, go back' cancels cleanly without deleting anything (no active subscription case) @real-email", async ({ page }) => {
       // 1. With a payment method saved (test 6.2 above left card '...4444'
       // in place), and with NO active paid subscription (this disposable
       // account has never touched /subscription anywhere earlier in this
@@ -1605,7 +1605,7 @@ test.describe('Payments', () => {
       await expect(page.getByRole('heading', { name: expiryBefore!, exact: true })).toBeVisible();
     });
 
-    test("6.4 Confirming deletion ('Yes, remove') removes the payment method and correctly reverts both /payments and the /company summary card to 'No Payment Method'", async ({ page }) => {
+    test("6.4 Confirming deletion ('Yes, remove') removes the payment method and correctly reverts both /payments and the /company summary card to 'No Payment Method' @real-email", async ({ page }) => {
       // Capture the 'Payment History' table's row count on /company BEFORE
       // this test's deletion - compared to itself after, per this file's
       // established discover-don't-hardcode pattern (see
@@ -1643,7 +1643,7 @@ test.describe('Payments', () => {
       expect(await paymentHistoryRowCount(page)).toBe(paymentHistoryRowsBefore);
     });
 
-    test("6.5 Submitting the exact same card (same number, expiry, CVC) as the currently-saved one is accepted silently, with no 'this card is already saved' detection", async ({ page }) => {
+    test("6.5 Submitting the exact same card (same number, expiry, CVC) as the currently-saved one is accepted silently, with no 'this card is already saved' detection @real-email", async ({ page }) => {
       // Two real SetupIntent confirmation + backend save round-trips back
       // to back - comfortably exceeds the default 30s test timeout budget
       // on a slow-but-not-broken run.
@@ -1686,7 +1686,7 @@ test.describe('Payments', () => {
       await expect(page.getByRole('heading', { name: '**** **** **** 4242', exact: true })).toBeVisible();
     });
 
-    test("6.6 With a real active PAID subscription, the button relabels to 'Delete Payment Method & Cancel Subscription' and opens a differently-titled 'Cancel Subscription' dialog instead of 'Remove Payment Method'", async ({
+    test("6.6 With a real active PAID subscription, the button relabels to 'Delete Payment Method & Cancel Subscription' and opens a differently-titled 'Cancel Subscription' dialog instead of 'Remove Payment Method' @real-email", async ({
       page,
     }) => {
       // A real Stripe Checkout round-trip (navigation to Stripe's own
@@ -1797,7 +1797,7 @@ test.describe('Payments', () => {
       await expect(page.getByRole('button', { name: 'Finish Cancellation' })).toBeVisible();
     });
 
-    test("6.7 Confirming 'Finish Cancellation' removes the payment method immediately but schedules the subscription to cancel at period end, not immediately", async ({ page }) => {
+    test("6.7 Confirming 'Finish Cancellation' removes the payment method immediately but schedules the subscription to cancel at period end, not immediately @real-email", async ({ page }) => {
       // A real payment-method removal + subscription-cancellation backend
       // round-trip - live-verified this can exceed the default 30s test
       // timeout on a slow-but-not-broken run, the same reasoning every

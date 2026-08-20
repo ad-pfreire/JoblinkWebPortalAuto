@@ -44,7 +44,13 @@ jobs:
     # tests that read an email, but every /forgot-password submission, since
     # that request itself has been confirmed (live, with zero concurrency)
     # to intermittently hang on the real backend, apparently tied to that
-    # same pipeline. This step must pass — a failure here is a real
+    # same pipeline. Also covers all of tests/payments.spec.ts: none of its
+    # individual tests read an email themselves, but its shared
+    # beforeAll (registers one disposable account for the whole file) does,
+    # so every test in that file is @real-email too - live-verified via a
+    # real CI run where that beforeAll's email wait exhausting its retry
+    # budget failed this "core" step for a reason that wasn't a real
+    # regression. This step must pass — a failure here is a real
     # regression, not infrastructure flakiness.
     - name: Run Playwright tests (core)
       run: npx playwright test --grep-invert @real-email
