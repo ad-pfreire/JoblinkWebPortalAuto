@@ -353,7 +353,25 @@ test.describe('Payments', () => {
   // state on the shared seed account (Company Details/Logo Upload/Profile
   // Settings' pattern) AND N redundant real email-verification round-trips
   // (account-registration.spec.ts/forgot-password.spec.ts's per-test pattern).
-  test.beforeAll(async ({ browser }) => {
+  test.beforeAll(async ({ browser, browserName }) => {
+    // `test.skip(browserName !== 'chromium', ...)` in the beforeEach below
+    // only skips individual TESTS - it does nothing to gate this beforeAll
+    // hook, which runs once per project regardless, BEFORE any test-level
+    // skip ever gets a chance to apply. Live-verified via a real CI run:
+    // without this same guard here too, GitHub Actions' 3-project matrix
+    // (chromium/firefox/webkit) was independently registering a fresh
+    // disposable account and waiting up to 3 x 240s for a real
+    // verification email on firefox AND webkit as well - for a file whose
+    // every single test then immediately skips on those two projects
+    // anyway. Three real accounts hitting the same real email pipeline
+    // back-to-back-to-back (one per project) is also exactly the kind of
+    // concurrent load this session repeatedly saw degrade that pipeline's
+    // reliability locally. Skipping here avoids all of that entirely.
+    test.skip(
+      browserName !== 'chromium',
+      'Disposable single-company state built up sequentially across this file; runs once serially on chromium to avoid cross-project races, redundant registrations, and extra real-email load on the other 2 projects.'
+    );
+
     // Generous budget - see the describe-level `retries: 2` comment above
     // for why this hook's own timeout is set well above
     // getVerificationLink's explicit budget rather than relying on the
