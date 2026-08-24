@@ -37,7 +37,7 @@ Six cards on one page: Company Details and Logo Upload on their own, then Integr
 
 | Area | What's there | Status | Tests |
 |---|---|---|---|
-| **Teams** | Sub-tabs "For you" / "Teams" / "Members", a "Select Teams & People" search box, "+ Create Team" and "Invite Member" buttons, team cards (`/teams/list`) and member list (`/teams/members`) | ❌ | — |
+| **Teams** | Sub-tabs "For you" / "Teams" / "Members", a "Select Teams & People" search box, "+ Create Team" and "Invite Member" buttons, team cards (`/teams/list`) and member list (`/teams/members`), full invite → real email → accept flow | ✅ | `tests/teams.spec.ts` |
 
 When picking up new coverage: use the `playwright-test-planner` agent (or manual exploration) to write a plan in `specs/<area>-test-plan.md` first (see [Test plans](#test-plans-specs), then generate/write the spec file, then flip that row's status here.
 
