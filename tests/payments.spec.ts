@@ -178,12 +178,18 @@ function rewardsBalancesCard(page: Page) {
 // this listener with framework noise unrelated to the action under test -
 // excluded here rather than at each call site since it applies universally
 // to every use of this helper on this page.
+// Also excludes any request for /favicon.ico - live-verified (a real CI/local
+// run of the Coupon Code suite) that a fresh browser context with no cached
+// favicon yet can fire its own GET for it at an arbitrary point near a
+// navigation, entirely independent of anything a test does - the same kind
+// of framework/browser noise as the _rsc exclusion above, just triggered by
+// the browser itself rather than Next.js.
 function trackAppRequests(page: Page): string[] {
   const appHostname = new URL(BASE_URL).hostname;
   const requests: string[] = [];
   page.on('request', (request) => {
     const url = new URL(request.url());
-    if (url.hostname === appHostname && !url.searchParams.has('_rsc')) {
+    if (url.hostname === appHostname && !url.searchParams.has('_rsc') && url.pathname !== '/favicon.ico') {
       requests.push(request.url());
     }
   });
@@ -224,8 +230,8 @@ async function fillValidPaymentMethodForm(page: Page) {
   // swap (see resolveStripeFrameByContent()'s comment for the full story).
   await (await billingAddressFrame(page)).getByRole('textbox', { name: 'Full name' }).pressSequentially('QA Payments Test');
   await (await billingAddressFrame(page)).getByRole('textbox', { name: 'Address line 1' }).pressSequentially('123 Main Street');
-  await (await billingAddressFrame(page)).getByRole('textbox', { name: 'City' }).pressSequentially('Quito');
-  await (await billingAddressFrame(page)).getByRole('textbox', { name: 'Postal code' }).pressSequentially('170150');
+  await (await billingAddressFrame(page)).locator('#billingAddress-localityInput').pressSequentially('Quito');
+  await (await billingAddressFrame(page)).locator('#billingAddress-postalCodeInput').pressSequentially('170150');
 
   await (await cardElementFrame(page)).getByRole('textbox', { name: 'Card number' }).pressSequentially('4242424242424242');
   await (await cardElementFrame(page)).getByRole('textbox', { name: 'Expiration date' }).pressSequentially('1234');
@@ -277,10 +283,10 @@ async function fillBillingAndCardFieldsWithoutCheckbox(
   }
   await (await billingAddressFrame(page)).getByRole('textbox', { name: 'Address line 1' }).pressSequentially('123 Main Street');
   if (city) {
-    await (await billingAddressFrame(page)).getByRole('textbox', { name: 'City' }).pressSequentially(city);
+    await (await billingAddressFrame(page)).locator('#billingAddress-localityInput').pressSequentially(city);
   }
   if (postalCode) {
-    await (await billingAddressFrame(page)).getByRole('textbox', { name: 'Postal code' }).pressSequentially(postalCode);
+    await (await billingAddressFrame(page)).locator('#billingAddress-postalCodeInput').pressSequentially(postalCode);
   }
 
   await (await cardElementFrame(page)).getByRole('textbox', { name: 'Card number' }).pressSequentially('4242424242424242');
@@ -739,7 +745,14 @@ test.describe('Payments', () => {
     });
   });
 
-  test.describe('Payments — Rewards & Balances / Coupon Code', () => {
+  // Skipped: per the maintainer, 'Redeem Coupon' is planned to actually be
+  // wired up in the next release, at which point these 4 no-op tests need to
+  // be rewritten entirely as real success/error-path coverage rather than
+  // patched in place (see the TODO on 3.4 below) - not worth chasing further
+  // flakiness (e.g. the favicon.ico false-positive fixed in
+  // trackAppRequests() above) on tests whose whole premise is about to
+  // become obsolete.
+  test.describe.skip('Payments — Rewards & Balances / Coupon Code', () => {
     test("3.1 Entering a realistic-looking coupon code and clicking 'Redeem Coupon' fires zero network requests and shows no success/error message (expected — feature not yet enabled) @real-email", async ({ page }) => {
       // 1. On /payments, type a plausible coupon code (e.g. 'TESTCOUPON123')
       // into the 'Coupon Code' field, then click 'Redeem Coupon'. Per the
@@ -1243,8 +1256,8 @@ test.describe('Payments', () => {
       await page.goto(`${BASE_URL}/payments`);
       await (await billingAddressFrame(page)).getByRole('textbox', { name: 'Full name' }).pressSequentially('QA Payments Decline');
       await (await billingAddressFrame(page)).getByRole('textbox', { name: 'Address line 1' }).pressSequentially('123 Main Street');
-      await (await billingAddressFrame(page)).getByRole('textbox', { name: 'City' }).pressSequentially('Quito');
-      await (await billingAddressFrame(page)).getByRole('textbox', { name: 'Postal code' }).pressSequentially('170150');
+      await (await billingAddressFrame(page)).locator('#billingAddress-localityInput').pressSequentially('Quito');
+      await (await billingAddressFrame(page)).locator('#billingAddress-postalCodeInput').pressSequentially('170150');
       await (await cardElementFrame(page)).getByRole('textbox', { name: 'Card number' }).pressSequentially('4000000000000002');
       await (await cardElementFrame(page)).getByRole('textbox', { name: 'Expiration date' }).pressSequentially('1234');
       await (await cardElementFrame(page)).getByRole('textbox', { name: 'Security code' }).pressSequentially('123');
@@ -1295,7 +1308,7 @@ test.describe('Payments', () => {
       await expect(page).toHaveURL(`${BASE_URL}/payments`);
       await expect((await billingAddressFrame(page)).getByRole('textbox', { name: 'Full name' })).toHaveValue('QA Payments Decline');
       await expect((await billingAddressFrame(page)).getByRole('textbox', { name: 'Address line 1' })).toHaveValue('123 Main Street');
-      await expect((await billingAddressFrame(page)).getByRole('textbox', { name: 'City' })).toHaveValue('Quito');
+      await expect((await billingAddressFrame(page)).locator('#billingAddress-localityInput')).toHaveValue('Quito');
       await expect((await cardElementFrame(page)).getByRole('textbox', { name: 'Card number' })).toHaveValue('4000 0000 0000 0002');
     });
 
@@ -1311,8 +1324,8 @@ test.describe('Payments', () => {
       await page.goto(`${BASE_URL}/payments`);
       await (await billingAddressFrame(page)).getByRole('textbox', { name: 'Full name' }).pressSequentially('QA Payments CVC');
       await (await billingAddressFrame(page)).getByRole('textbox', { name: 'Address line 1' }).pressSequentially('123 Main Street');
-      await (await billingAddressFrame(page)).getByRole('textbox', { name: 'City' }).pressSequentially('Quito');
-      await (await billingAddressFrame(page)).getByRole('textbox', { name: 'Postal code' }).pressSequentially('170150');
+      await (await billingAddressFrame(page)).locator('#billingAddress-localityInput').pressSequentially('Quito');
+      await (await billingAddressFrame(page)).locator('#billingAddress-postalCodeInput').pressSequentially('170150');
       await (await cardElementFrame(page)).getByRole('textbox', { name: 'Card number' }).pressSequentially('4000000000000127');
       await (await cardElementFrame(page)).getByRole('textbox', { name: 'Expiration date' }).pressSequentially('1234');
       await (await cardElementFrame(page)).getByRole('textbox', { name: 'Security code' }).pressSequentially('123');
@@ -1358,8 +1371,8 @@ test.describe('Payments', () => {
       await page.goto(`${BASE_URL}/payments`);
       await (await billingAddressFrame(page)).getByRole('textbox', { name: 'Full name' }).pressSequentially('QA Payments 3DS');
       await (await billingAddressFrame(page)).getByRole('textbox', { name: 'Address line 1' }).pressSequentially('123 Main Street');
-      await (await billingAddressFrame(page)).getByRole('textbox', { name: 'City' }).pressSequentially('Quito');
-      await (await billingAddressFrame(page)).getByRole('textbox', { name: 'Postal code' }).pressSequentially('170150');
+      await (await billingAddressFrame(page)).locator('#billingAddress-localityInput').pressSequentially('Quito');
+      await (await billingAddressFrame(page)).locator('#billingAddress-postalCodeInput').pressSequentially('170150');
       await (await cardElementFrame(page)).getByRole('textbox', { name: 'Card number' }).pressSequentially('4000002500003155');
       await (await cardElementFrame(page)).getByRole('textbox', { name: 'Expiration date' }).pressSequentially('1234');
       await (await cardElementFrame(page)).getByRole('textbox', { name: 'Security code' }).pressSequentially('123');
@@ -1474,13 +1487,15 @@ test.describe('Payments', () => {
       // accessible name purely from an external `<label for="...">`
       // association - structurally valid on a plain fresh load (confirmed
       // live), but apparently not reliably attached yet at the specific
-      // moment this test's fast, type-free read sequence hits it,
-      // specifically in the one context only Suite 6 exercises (a payment
-      // method already on file, so 'Current Payment Method' renders above
-      // this form - possibly triggering a layout reflow of the widget that
-      // Suite 5's fresh-form-only loads never hit). Querying by id
-      // sidesteps accessible-name computation entirely, so this timing gap
-      // no longer matters. The ids themselves are Stripe's own stable,
+      // moment a fast, type-free read/fill sequence hits it. Originally
+      // thought to be confined to this one Suite 6 context (a payment
+      // method already on file possibly triggering a layout reflow the
+      // fresh-form suites never hit) - since disproven by a real local run
+      // hitting the identical race on a plain fresh-form load (Suite 4's
+      // City fill), so this is now applied to every City/Postal code
+      // read or fill in this file, not just here. Querying by id sidesteps
+      // accessible-name computation entirely, so this timing gap no longer
+      // matters. The ids themselves are Stripe's own stable,
       // semantically-named ones (not per-session-random), confirmed via
       // live DOM inspection, so this is safe to hardcode.
       await expect((await billingAddressFrame(page)).locator('#billingAddress-nameInput')).toHaveValue('');
@@ -1524,8 +1539,8 @@ test.describe('Payments', () => {
       await page.goto(`${BASE_URL}/payments`);
       await (await billingAddressFrame(page)).getByRole('textbox', { name: 'Full name' }).pressSequentially('QA Payments Replace');
       await (await billingAddressFrame(page)).getByRole('textbox', { name: 'Address line 1' }).pressSequentially('456 Second Avenue');
-      await (await billingAddressFrame(page)).getByRole('textbox', { name: 'City' }).pressSequentially('Quito');
-      await (await billingAddressFrame(page)).getByRole('textbox', { name: 'Postal code' }).pressSequentially('170150');
+      await (await billingAddressFrame(page)).locator('#billingAddress-localityInput').pressSequentially('Quito');
+      await (await billingAddressFrame(page)).locator('#billingAddress-postalCodeInput').pressSequentially('170150');
       await (await cardElementFrame(page)).getByRole('textbox', { name: 'Card number' }).pressSequentially('5555555555554444');
       await (await cardElementFrame(page)).getByRole('textbox', { name: 'Expiration date' }).pressSequentially('1234');
       await (await cardElementFrame(page)).getByRole('textbox', { name: 'Security code' }).pressSequentially('123');
