@@ -502,13 +502,6 @@ test.describe('Subscription', () => {
       await page.getByRole('button', { name: 'Confirm and Pay' }).click();
       await expect(page).toHaveURL(/checkout\.stripe\.com/, { timeout: 30_000 });
 
-      // Set this up NOW, before filling any fields, so it can catch the
-      // response whenever it actually happens (see the long comment below,
-      // by the click, for why this exists and what it's waiting for).
-      const trustedTypesCheckerLoaded = page
-        .waitForResponse((r) => r.url().includes('trusted-types-checker') && r.status() === 200, { timeout: 30_000 })
-        .catch(() => null);
-
       // Fill an email address only if Checkout is asking for one and it
       // isn't already pre-filled - same pattern already proven in
       // payments.spec.ts's own Checkout round-trip (test 6.6).
@@ -551,28 +544,30 @@ test.describe('Subscription', () => {
       // Deliberately never touches the 'I am an AI agent...' checkbox - see
       // 4.1's comment for why.
       //
-      // CI-only failure, reproduced 3/3 real GitHub Actions runs
-      // (2026-08-26), never once locally - including once AFTER adding a
-      // blind 2s settle pause here, which did NOT fix it. Root-caused by
-      // downloading that failing run's actual trace (network + action log)
-      // and cross-referencing their timestamps: the click landed at
-      // essentially the exact same instant (~20ms before) Stripe's own
-      // 'trusted-types-checker-*.js' finished loading, then the page went
-      // completely silent - zero further network activity of ANY kind for
-      // the rest of the 45s timeout. Identical mechanism to this project's
-      // already-documented 3D Secure 'Complete' button gotcha (payments.
-      // spec.ts test 5.4 / this file's own 7.8): Stripe gates a button's
-      // click handler behind that script, and a click before it's loaded
-      // is a silent no-op. A blind timeout is inherently racy against this
-      // (Checkout's own load time varies, especially on GitHub Actions'
-      // slower shared runner - see this project's other CI-only Stripe
-      // timing gotchas in CLAUDE.md) - a 2s pause happened to land ~20ms
-      // too early in the run that exposed this. Waiting for the actual
-      // network signal instead of guessing a duration is deterministic
-      // regardless of how long the page takes to get there.
+      // CI-only failure, reproduced 4/4 real GitHub Actions runs
+      // (2026-08-26), never once locally - including across two different,
+      // increasingly-targeted timing-based fixes attempted here first (a
+      // blind 2s pause, then a deterministic wait for a specific Stripe
+      // script's network response), NEITHER of which helped. This was NOT a
+      // click-timing race at all, confirmed by downloading a failing run's
+      // real trace: the button's own JS DID receive the click both times
+      // (the trace's post-click DOM snapshot shows the button's text
+      // changed to "Processing"), but the payment submission never actually
+      // reached Stripe (confirmed directly via the Stripe API: the Checkout
+      // Session stays status "open" with payment_intent: null - the request
+      // never arrived). The trace's captured browser console pinned the
+      // real cause: Stripe Checkout's submit flow depends on a token from
+      // hCaptcha's invisible verification iframe first, and that iframe
+      // logged "GPU stall due to ReadPixels" a few seconds in - GitHub
+      // Actions' shared runner has no real GPU, and that WebGL-dependent
+      // verification step hangs forever there, so the token (and the actual
+      // submission behind it) never comes. No amount of waiting in this
+      // test can fix a step that never resolves. Real fix is in
+      // playwright.config.ts: CI-only Chromium launch flags forcing
+      // Chromium onto its own supported software-rendering path instead of
+      // whatever GPU path was stalling - see the comment there.
       const payButton = page.getByRole('button', { name: /Subscribe|Pay/ });
       await expect(payButton).toBeVisible();
-      await trustedTypesCheckerLoaded;
       await payButton.click();
 
       await expect(page).toHaveURL(/\/subscription\?success=true/, { timeout: 45_000 });

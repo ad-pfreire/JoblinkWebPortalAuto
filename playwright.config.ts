@@ -36,7 +36,29 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        // CI-only: GitHub Actions' shared runner has no real GPU. Live-verified
+        // via a downloaded trace (subscription.spec.ts test 4.2, 4/4 real CI
+        // failures, never once locally) that Stripe Checkout's hosted page
+        // hangs forever in a "Processing" state after a real, correctly-timed
+        // click - the button's own JS DOES receive the click (confirmed via
+        // the trace's After-snapshot showing "Processing"), but the actual
+        // payment submission never reaches Stripe at all (confirmed via the
+        // Stripe API itself: the Checkout Session stays status "open" with
+        // payment_intent: null). The trace's own captured browser console
+        // pinned the cause: hCaptcha's invisible verification iframe (which
+        // Checkout's submit flow depends on for a token before it will
+        // actually submit) logs "GPU stall due to ReadPixels" a few seconds
+        // in, then the whole page goes completely silent - consistent with a
+        // WebGL-dependent verification step hanging on a GPU-less runner.
+        // --use-gl=angle + --use-angle=swiftshader forces Chromium onto its
+        // own supported software-rendering path instead of whatever
+        // passthrough/virtual GPU path was stalling.
+        launchOptions: process.env.CI
+          ? { args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] }
+          : {},
+      },
     },
 
     {
