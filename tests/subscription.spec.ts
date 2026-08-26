@@ -543,7 +543,24 @@ test.describe('Subscription', () => {
 
       // Deliberately never touches the 'I am an AI agent...' checkbox - see
       // 4.1's comment for why.
-      await page.getByRole('button', { name: /Subscribe|Pay/ }).click();
+      //
+      // CI-only failure, reproduced 2/2 real GitHub Actions runs
+      // (2026-08-26), never once locally: the click lands with no
+      // Playwright error, but the page stays on checkout.stripe.com
+      // forever, never redirecting - identical shape to this project's
+      // already-documented 3D Secure 'Complete' button gotcha
+      // (payments.spec.ts test 5.4 / this file's own 7.8), where the
+      // button becomes actionable before Stripe's own JS has finished
+      // wiring up its click handler, so an immediate click is a silent
+      // no-op. GitHub Actions' shared runner is measurably slower than a
+      // local machine (see this project's other CI-only Stripe timing
+      // gotchas in CLAUDE.md), which is consistent with this only ever
+      // surfacing there. Applying the same settle-pause fix already
+      // proven for that button here too.
+      const payButton = page.getByRole('button', { name: /Subscribe|Pay/ });
+      await expect(payButton).toBeVisible();
+      await page.waitForTimeout(2_000);
+      await payButton.click();
 
       await expect(page).toHaveURL(/\/subscription\?success=true/, { timeout: 45_000 });
       await expect(page.getByText('Your subscription has been successfully activated!', { exact: true })).toBeVisible();
