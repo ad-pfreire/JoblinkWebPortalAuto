@@ -228,6 +228,26 @@ async function selectPlanAndContinue(page: Page, planName: string) {
 // getVerificationLink's own timeout below) - producing exactly ONE email
 // competing for pipeline capacity instead of three - is the fix that
 // actually addresses the root cause instead of just retrying around it.
+// Scoped to ONLY this file, not the whole chromium project - see the
+// CI-only GPU/hCaptcha gotcha in CLAUDE.md for why this exists. Live-
+// verified the hard way: putting this at the project level in
+// playwright.config.ts instead (affecting every file, since CI's
+// workers: 1 means one shared browser process for the entire suite)
+// fixed test 4.2 but broke two unrelated, previously rock-solid
+// timing-sensitive tests in profile-settings.spec.ts (a rapid-
+// double-click dedup test and a rapid-keystroke type-ahead test) on
+// the very next real CI run - software rendering is measurably slower
+// at compositing than GPU rendering, which was apparently enough to
+// shift their timing. Playwright launches a separate browser instance
+// for a file whose resolved launchOptions differ from the default, so
+// this keeps the fix contained to just the tests that actually need
+// it. Must be top-level (module scope), NOT inside a test.describe() -
+// Playwright errors "Cannot use({ launchOptions }) in a describe group,
+// because it forces a new worker" if it isn't.
+test.use({
+  launchOptions: process.env.CI ? { args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] } : {},
+});
+
 test.describe('Subscription', () => {
   test.describe.configure({ mode: 'serial' });
 
