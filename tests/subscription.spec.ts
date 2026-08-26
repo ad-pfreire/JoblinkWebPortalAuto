@@ -502,6 +502,13 @@ test.describe('Subscription', () => {
       await page.getByRole('button', { name: 'Confirm and Pay' }).click();
       await expect(page).toHaveURL(/checkout\.stripe\.com/, { timeout: 30_000 });
 
+      // Set this up NOW, before filling any fields, so it can catch the
+      // response whenever it actually happens (see the long comment below,
+      // by the click, for why this exists and what it's waiting for).
+      const trustedTypesCheckerLoaded = page
+        .waitForResponse((r) => r.url().includes('trusted-types-checker') && r.status() === 200, { timeout: 30_000 })
+        .catch(() => null);
+
       // Fill an email address only if Checkout is asking for one and it
       // isn't already pre-filled - same pattern already proven in
       // payments.spec.ts's own Checkout round-trip (test 6.6).
@@ -544,22 +551,28 @@ test.describe('Subscription', () => {
       // Deliberately never touches the 'I am an AI agent...' checkbox - see
       // 4.1's comment for why.
       //
-      // CI-only failure, reproduced 2/2 real GitHub Actions runs
-      // (2026-08-26), never once locally: the click lands with no
-      // Playwright error, but the page stays on checkout.stripe.com
-      // forever, never redirecting - identical shape to this project's
-      // already-documented 3D Secure 'Complete' button gotcha
-      // (payments.spec.ts test 5.4 / this file's own 7.8), where the
-      // button becomes actionable before Stripe's own JS has finished
-      // wiring up its click handler, so an immediate click is a silent
-      // no-op. GitHub Actions' shared runner is measurably slower than a
-      // local machine (see this project's other CI-only Stripe timing
-      // gotchas in CLAUDE.md), which is consistent with this only ever
-      // surfacing there. Applying the same settle-pause fix already
-      // proven for that button here too.
+      // CI-only failure, reproduced 3/3 real GitHub Actions runs
+      // (2026-08-26), never once locally - including once AFTER adding a
+      // blind 2s settle pause here, which did NOT fix it. Root-caused by
+      // downloading that failing run's actual trace (network + action log)
+      // and cross-referencing their timestamps: the click landed at
+      // essentially the exact same instant (~20ms before) Stripe's own
+      // 'trusted-types-checker-*.js' finished loading, then the page went
+      // completely silent - zero further network activity of ANY kind for
+      // the rest of the 45s timeout. Identical mechanism to this project's
+      // already-documented 3D Secure 'Complete' button gotcha (payments.
+      // spec.ts test 5.4 / this file's own 7.8): Stripe gates a button's
+      // click handler behind that script, and a click before it's loaded
+      // is a silent no-op. A blind timeout is inherently racy against this
+      // (Checkout's own load time varies, especially on GitHub Actions'
+      // slower shared runner - see this project's other CI-only Stripe
+      // timing gotchas in CLAUDE.md) - a 2s pause happened to land ~20ms
+      // too early in the run that exposed this. Waiting for the actual
+      // network signal instead of guessing a duration is deterministic
+      // regardless of how long the page takes to get there.
       const payButton = page.getByRole('button', { name: /Subscribe|Pay/ });
       await expect(payButton).toBeVisible();
-      await page.waitForTimeout(2_000);
+      await trustedTypesCheckerLoaded;
       await payButton.click();
 
       await expect(page).toHaveURL(/\/subscription\?success=true/, { timeout: 45_000 });
