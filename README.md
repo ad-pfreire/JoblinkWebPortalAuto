@@ -30,7 +30,7 @@ Six cards on one page: Company Details and Logo Upload on their own, then Integr
 | **Logo Upload** | "Upload" button; stated limit "at least 150x150 px and no more than 500KB" | ✅ | `tests/logo-upload.spec.ts` |
 | **Integrations** | Lists QuickBooks and Calendar; "Manage integrations" button opens an in-page modal with a Connect/Manage table, a Status column, and a note that only one work-order tool can be linked at a time | ❌ | — |
 | **Payments** (summary card) | Shows "No Payment Method" when unset; "Manage Payments" link goes to the full **`/payments`** page — Stripe-hosted Billing Address + Card form, "Redeem Coupon" | ✅ | `tests/payments.spec.ts` |
-| **Subscription** (summary card) | Shows current plan name + trial end date; "Manage Subscription" link goes to the full **`/subscription`** page — Free / Job Link Pro / Job Link Pro + Invoicing plan comparison, each listing feature bullets like "Add New Jobs", "Inspection Checklists", "Photos and Notes", "Customer and Equipment History" (marketing copy on the comparison card, not a real in-app "Jobs" section) | ❌ | — |
+| **Subscription** (summary card) | Shows current plan name + trial end date; "Manage Subscription" link goes to the full **`/subscription`** page — Free / Job Link Pro / Job Link Pro + Invoicing plan comparison, each listing feature bullets like "Add New Jobs", "Inspection Checklists", "Photos and Notes", "Customer and Equipment History" (marketing copy on the comparison card, not a real in-app "Jobs" section); covers plan selection, Monthly/Yearly toggle, first purchase via real Stripe Checkout, in-app upgrade/downgrade, cancel/resume, and edge cases | ✅ (24/25 — 1 known flaky, see below) | `tests/subscription.spec.ts` |
 | **Payment History** | Table: Status / Date / Title / Amount / Billing ID / Invoice; "No Payment History" placeholder when empty | ❌ | — |
 
 ### Teams (`/teams`) — second tab
@@ -38,6 +38,8 @@ Six cards on one page: Company Details and Logo Upload on their own, then Integr
 | Area | What's there | Status | Tests |
 |---|---|---|---|
 | **Teams** | Sub-tabs "For you" / "Teams" / "Members", a "Select Teams & People" search box, "+ Create Team" and "Invite Member" buttons, team cards (`/teams/list`) and member list (`/teams/members`), full invite → real email → accept flow | ✅ | `tests/teams.spec.ts` |
+
+**Subscription's one known-flaky test**: scenario 8.3 in `tests/subscription.spec.ts` ("toggling Monthly/Yearly alone can leave 'Continue' non-functional until the plan card is explicitly re-clicked") is marked `test.fixme()` — live-verified across 30+ full-suite runs, this specific interaction is genuinely inconsistent even with a 100s retry budget and deliberate settle pauses (the same fix that made the adjacent Resume Subscription tests rock solid). Most likely a low-probability race in the app itself, not something test-side retrying can fully eliminate. See the comment on that test and `specs/subscription-test-plan.md` finding 26 before re-enabling it.
 
 When picking up new coverage: use the `playwright-test-planner` agent (or manual exploration) to write a plan in `specs/<area>-test-plan.md` first (see [Test plans](#test-plans-specs), then generate/write the spec file, then flip that row's status here.
 
