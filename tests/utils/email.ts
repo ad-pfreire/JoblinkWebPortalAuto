@@ -43,25 +43,48 @@ function resolveRealDestination(href: string): string {
 // already passes a freshly `generateUniqueEmailAlias()`d address that has
 // never received mail before, so a `to`-only search can't collide with a
 // stale message from an earlier run either.
+// KNOWN GOTCHA, live-verified 2026-08-25 while writing tests/subscription.spec.ts:
+// holding ONE IMAP connection/mailbox lock open for the entire poll loop
+// (the pattern this function, getInvitationLink(), and getPasswordResetCode()
+// all previously used) can silently never see mail that arrives DURING that
+// same long-lived session, even after 900_000ms (15 minutes) of continuous
+// polling on 3s intervals - reproduced identically across 10+ consecutive
+// real runs, including a from-scratch run started by the maintainer
+// directly in a fresh terminal (so not an artifact of this session's own
+// prior activity). In every single case, a completely SEPARATE, freshly
+// connected IMAP script (connect -> select -> search, once) found the exact
+// same email instantly, often within seconds of when it was actually sent
+// (confirmed via the message's own envelope Date header) - proving the
+// message was sitting in the mailbox the whole time and the long-lived
+// polling connection simply never picked it up. Gmail's IMAP server appears
+// not to reliably push new-mail state to an already-SELECTed session across
+// repeated SEARCH commands the way a plain re-connect-and-search always
+// does. Fix: reconnect from scratch on every poll iteration (matching the
+// approach that never once failed in ad-hoc verification scripts) rather
+// than holding one connection/lock open for the whole timeout budget. This
+// is heavier per-iteration (a fresh TLS handshake every 3s) but the
+// reliability difference is not a marginal improvement - it is the
+// difference between "always eventually finds a message that is
+// demonstrably already there" and "can time out indefinitely regardless of
+// budget size."
 export async function getVerificationLink(toAddress: string, sentAfter: Date, timeoutMs = 150000): Promise<string> {
   void sentAfter;
-  const client = new ImapFlow({
-    host: 'imap.gmail.com',
-    port: 993,
-    secure: true,
-    auth: {
-      user: requireEnv('GMAIL_IMAP_USER'),
-      pass: requireEnv('GMAIL_IMAP_APP_PASSWORD'),
-    },
-    logger: false,
-  });
-
-  await client.connect();
-  try {
-    const lock = await client.getMailboxLock('INBOX');
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const client = new ImapFlow({
+      host: 'imap.gmail.com',
+      port: 993,
+      secure: true,
+      auth: {
+        user: requireEnv('GMAIL_IMAP_USER'),
+        pass: requireEnv('GMAIL_IMAP_APP_PASSWORD'),
+      },
+      logger: false,
+    });
+    await client.connect();
     try {
-      const deadline = Date.now() + timeoutMs;
-      while (Date.now() < deadline) {
+      const lock = await client.getMailboxLock('INBOX');
+      try {
         const uids = await client.search({ to: toAddress }, { uid: true });
         if (uids && uids.length > 0) {
           const latestUid = uids[uids.length - 1];
@@ -84,15 +107,15 @@ export async function getVerificationLink(toAddress: string, sentAfter: Date, ti
           }
           return resolveRealDestination(match[1].replace(/&amp;/g, '&'));
         }
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+      } finally {
+        lock.release();
       }
-      throw new Error(`Timed out waiting for verification email to ${toAddress} after ${timeoutMs}ms.`);
     } finally {
-      lock.release();
+      await client.logout();
     }
-  } finally {
-    await client.logout();
+    await new Promise((resolve) => setTimeout(resolve, 3000));
   }
+  throw new Error(`Timed out waiting for verification email to ${toAddress} after ${timeoutMs}ms.`);
 }
 
 // The team-invitation email ("New Invitation!" subject) embeds the
@@ -114,24 +137,26 @@ const INVITATION_LINK_PATTERN = /(https:\/\/[^\s<]+\/invitation\?token=[A-Za-z0-
 // every caller of this function passes a freshly `generateUniqueEmailAlias()`d
 // address that has never received mail before, so matching by `to` alone
 // can never collide with a stale message from an earlier run.
+// See the KNOWN GOTCHA on getVerificationLink() above for why this
+// reconnects fresh on every poll iteration instead of holding one
+// connection/lock open for the whole timeout budget.
 export async function getInvitationLink(toAddress: string, timeoutMs = 150000): Promise<string> {
-  const client = new ImapFlow({
-    host: 'imap.gmail.com',
-    port: 993,
-    secure: true,
-    auth: {
-      user: requireEnv('GMAIL_IMAP_USER'),
-      pass: requireEnv('GMAIL_IMAP_APP_PASSWORD'),
-    },
-    logger: false,
-  });
-
-  await client.connect();
-  try {
-    const lock = await client.getMailboxLock('INBOX');
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const client = new ImapFlow({
+      host: 'imap.gmail.com',
+      port: 993,
+      secure: true,
+      auth: {
+        user: requireEnv('GMAIL_IMAP_USER'),
+        pass: requireEnv('GMAIL_IMAP_APP_PASSWORD'),
+      },
+      logger: false,
+    });
+    await client.connect();
     try {
-      const deadline = Date.now() + timeoutMs;
-      while (Date.now() < deadline) {
+      const lock = await client.getMailboxLock('INBOX');
+      try {
         const uids = await client.search({ to: toAddress }, { uid: true });
         if (uids && uids.length > 0) {
           const latestUid = uids[uids.length - 1];
@@ -154,15 +179,15 @@ export async function getInvitationLink(toAddress: string, timeoutMs = 150000): 
           }
           return match[1].replace(/\.$/, '').replace(/&amp;/g, '&');
         }
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+      } finally {
+        lock.release();
       }
-      throw new Error(`Timed out waiting for invitation email to ${toAddress} after ${timeoutMs}ms.`);
     } finally {
-      lock.release();
+      await client.logout();
     }
-  } finally {
-    await client.logout();
+    await new Promise((resolve) => setTimeout(resolve, 3000));
   }
+  throw new Error(`Timed out waiting for invitation email to ${toAddress} after ${timeoutMs}ms.`);
 }
 
 // KNOWN GOTCHA, live-verified while writing tests/teams.spec.ts's test 6.7:
@@ -197,25 +222,27 @@ export async function getInvitationLink(toAddress: string, timeoutMs = 150000): 
 // only call site also always targets a freshly-registered, never-reused
 // disposable alias for its one-shot real-reset test, so a `to`-only search
 // is equally safe here.
+// See the KNOWN GOTCHA on getVerificationLink() above for why this
+// reconnects fresh on every poll iteration instead of holding one
+// connection/lock open for the whole timeout budget.
 export async function getPasswordResetCode(toAddress: string, sentAfter: Date, timeoutMs = 150000): Promise<string> {
   void sentAfter;
-  const client = new ImapFlow({
-    host: 'imap.gmail.com',
-    port: 993,
-    secure: true,
-    auth: {
-      user: requireEnv('GMAIL_IMAP_USER'),
-      pass: requireEnv('GMAIL_IMAP_APP_PASSWORD'),
-    },
-    logger: false,
-  });
-
-  await client.connect();
-  try {
-    const lock = await client.getMailboxLock('INBOX');
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const client = new ImapFlow({
+      host: 'imap.gmail.com',
+      port: 993,
+      secure: true,
+      auth: {
+        user: requireEnv('GMAIL_IMAP_USER'),
+        pass: requireEnv('GMAIL_IMAP_APP_PASSWORD'),
+      },
+      logger: false,
+    });
+    await client.connect();
     try {
-      const deadline = Date.now() + timeoutMs;
-      while (Date.now() < deadline) {
+      const lock = await client.getMailboxLock('INBOX');
+      try {
         const uids = await client.search({ to: toAddress }, { uid: true });
         if (uids && uids.length > 0) {
           const latestUid = uids[uids.length - 1];
@@ -238,13 +265,13 @@ export async function getPasswordResetCode(toAddress: string, sentAfter: Date, t
           }
           return match[1];
         }
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+      } finally {
+        lock.release();
       }
-      throw new Error(`Timed out waiting for password recovery email to ${toAddress} after ${timeoutMs}ms.`);
     } finally {
-      lock.release();
+      await client.logout();
     }
-  } finally {
-    await client.logout();
+    await new Promise((resolve) => setTimeout(resolve, 3000));
   }
+  throw new Error(`Timed out waiting for password recovery email to ${toAddress} after ${timeoutMs}ms.`);
 }
