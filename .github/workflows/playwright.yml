@@ -63,6 +63,17 @@ jobs:
         TEST_REGISTER_PASSWORD: ${{ secrets.TEST_REGISTER_PASSWORD }}
         GMAIL_IMAP_USER: ${{ secrets.GMAIL_IMAP_USER }}
         GMAIL_IMAP_APP_PASSWORD: ${{ secrets.GMAIL_IMAP_APP_PASSWORD }}
+        # tests/teams-plan-gating.spec.ts reads these at module load time
+        # (requireEnv() calls outside any test), so they must be present
+        # here too even though every one of its own tests is tagged
+        # @real-email and only actually RUNS in the step below - Playwright
+        # loads/parses every matching spec file to discover tests before
+        # applying --grep/--grep-invert, so a missing var here crashes this
+        # whole step's process before any filtering happens. Live-verified
+        # 2026-08-27: this exact failure took down "core" for every file,
+        # not just this one.
+        STRIPE_TEST_RESTRICTED_KEY: ${{ secrets.STRIPE_TEST_RESTRICTED_KEY }}
+        MONGODB_PRESTAGING_URI: ${{ secrets.MONGODB_PRESTAGING_URI }}
     - uses: actions/upload-artifact@v4
       if: ${{ !cancelled() }}
       with:
@@ -89,6 +100,8 @@ jobs:
         TEST_REGISTER_PASSWORD: ${{ secrets.TEST_REGISTER_PASSWORD }}
         GMAIL_IMAP_USER: ${{ secrets.GMAIL_IMAP_USER }}
         GMAIL_IMAP_APP_PASSWORD: ${{ secrets.GMAIL_IMAP_APP_PASSWORD }}
+        STRIPE_TEST_RESTRICTED_KEY: ${{ secrets.STRIPE_TEST_RESTRICTED_KEY }}
+        MONGODB_PRESTAGING_URI: ${{ secrets.MONGODB_PRESTAGING_URI }}
     - uses: actions/upload-artifact@v4
       if: ${{ !cancelled() }}
       with:
