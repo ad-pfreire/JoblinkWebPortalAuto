@@ -19,6 +19,7 @@
     "@types/node": "^26.1.2",
     "dotenv": "^17.4.2",
     "imapflow": "^1.6.5",
-    "mailparser": "^3.9.14"
+    "mailparser": "^3.9.14",
+    "mongodb": "^7.6.0"
   }
 }

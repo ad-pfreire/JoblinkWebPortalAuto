@@ -36,11 +36,12 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      // subscription.spec.ts runs under its own dedicated project below
-      // instead (chromium-only file, needs Chromium-specific launch args -
-      // see that project's own comment for why it can't just be handled
-      // inside the file itself).
-      testIgnore: /subscription\.spec\.ts/,
+      // subscription.spec.ts and teams-plan-gating.spec.ts each run under
+      // their own dedicated project below instead (chromium-only files
+      // needing Chromium-specific launch args - see those projects' own
+      // comments for why this can't just be handled inside the files
+      // themselves).
+      testIgnore: [/subscription\.spec\.ts/, /teams-plan-gating\.spec\.ts/],
       use: { ...devices['Desktop Chrome'] },
     },
 
@@ -71,15 +72,30 @@ export default defineConfig({
       },
     },
 
+    // teams-plan-gating.spec.ts's own dedicated project - same reasoning
+    // as chromium-subscription above (this file also does a real Stripe
+    // Checkout purchase in its own beforeAll, hitting the identical
+    // GPU/hCaptcha issue on GitHub Actions).
+    {
+      name: 'chromium-teams-plan-gating',
+      testMatch: /teams-plan-gating\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        launchOptions: process.env.CI
+          ? { args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] }
+          : {},
+      },
+    },
+
     {
       name: 'firefox',
-      testIgnore: /subscription\.spec\.ts/,
+      testIgnore: [/subscription\.spec\.ts/, /teams-plan-gating\.spec\.ts/],
       use: { ...devices['Desktop Firefox'] },
     },
 
     {
       name: 'webkit',
-      testIgnore: /subscription\.spec\.ts/,
+      testIgnore: [/subscription\.spec\.ts/, /teams-plan-gating\.spec\.ts/],
       use: { ...devices['Desktop Safari'] },
     },
 
