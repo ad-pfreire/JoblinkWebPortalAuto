@@ -186,3 +186,5 @@ npx playwright test --grep @real-email          # only the real-email-dependent 
 ```
 
 CI (`.github/workflows/playwright.yml`) runs `@real-email` tests in a separate step with `continue-on-error: true` — known pre-staging infra flakiness (email delivery timing, occasional hangs), not a merge blocker.
+
+**Exception**: `tests/subscription.spec.ts` runs under its own dedicated project, `chromium-subscription`, not the regular `chromium` project - see that project's comment in `playwright.config.ts` for why (Chromium-only CI launch flags that would crash webkit/firefox if applied file-wide via `test.use()`). `npx playwright test tests/subscription.spec.ts --project=chromium` matches zero tests; use `npx playwright test tests/subscription.spec.ts --project=chromium-subscription` instead.

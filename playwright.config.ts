@@ -36,16 +36,50 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
+      // subscription.spec.ts runs under its own dedicated project below
+      // instead (chromium-only file, needs Chromium-specific launch args -
+      // see that project's own comment for why it can't just be handled
+      // inside the file itself).
+      testIgnore: /subscription\.spec\.ts/,
       use: { ...devices['Desktop Chrome'] },
+    },
+
+    // subscription.spec.ts's own dedicated project. This file is
+    // chromium-only (it test.skip()s itself on other browsers via its own
+    // beforeAll/beforeEach, matching payments.spec.ts/teams.spec.ts's
+    // pattern), and its CI-only launchOptions (forcing Chromium onto a
+    // software-rendering path - see CLAUDE.md's GPU/hCaptcha gotcha) are
+    // Chromium-specific flags. Live-verified the hard way why this can't
+    // just be a file-level test.use() call instead: CI runs
+    // `npx playwright test --grep @real-email` with no --project filter,
+    // so a file-level test.use({ launchOptions }) gets applied across
+    // EVERY project that attempts this file, not just chromium - webkit's
+    // browser crashed outright ("Cannot parse arguments: Unknown option
+    // --use-gl=angle") because it doesn't understand Chromium flags. A
+    // dedicated project scoped to only this file, combined with
+    // testIgnore-ing the file out of chromium/firefox/webkit below, keeps
+    // the special flags contained to exactly the file and the browser
+    // engine that both need them.
+    {
+      name: 'chromium-subscription',
+      testMatch: /subscription\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        launchOptions: process.env.CI
+          ? { args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] }
+          : {},
+      },
     },
 
     {
       name: 'firefox',
+      testIgnore: /subscription\.spec\.ts/,
       use: { ...devices['Desktop Firefox'] },
     },
 
     {
       name: 'webkit',
+      testIgnore: /subscription\.spec\.ts/,
       use: { ...devices['Desktop Safari'] },
     },
 
