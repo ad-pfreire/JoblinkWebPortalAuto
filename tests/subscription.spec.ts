@@ -564,28 +564,21 @@ test.describe('Subscription', () => {
       // Deliberately never touches the 'I am an AI agent...' checkbox - see
       // 4.1's comment for why.
       //
-      // CI-only failure, reproduced 4/4 real GitHub Actions runs
-      // (2026-08-26), never once locally - including across two different,
-      // increasingly-targeted timing-based fixes attempted here first (a
-      // blind 2s pause, then a deterministic wait for a specific Stripe
-      // script's network response), NEITHER of which helped. This was NOT a
-      // click-timing race at all, confirmed by downloading a failing run's
-      // real trace: the button's own JS DID receive the click both times
-      // (the trace's post-click DOM snapshot shows the button's text
-      // changed to "Processing"), but the payment submission never actually
-      // reached Stripe (confirmed directly via the Stripe API: the Checkout
-      // Session stays status "open" with payment_intent: null - the request
-      // never arrived). The trace's captured browser console pinned the
-      // real cause: Stripe Checkout's submit flow depends on a token from
-      // hCaptcha's invisible verification iframe first, and that iframe
-      // logged "GPU stall due to ReadPixels" a few seconds in - GitHub
-      // Actions' shared runner has no real GPU, and that WebGL-dependent
-      // verification step hangs forever there, so the token (and the actual
-      // submission behind it) never comes. No amount of waiting in this
-      // test can fix a step that never resolves. Real fix is in
-      // playwright.config.ts: CI-only Chromium launch flags forcing
-      // Chromium onto its own supported software-rendering path instead of
-      // whatever GPU path was stalling - see the comment there.
+      // KNOWN CI-ONLY LIMITATION, not fully fixable from this file - see
+      // the full writeup in CLAUDE.md ("subscription.spec.ts test 4.2 ...
+      // two real, distinct causes found, one fixed, one accepted"). Short
+      // version: Checkout's submit flow depends on a token from hCaptcha's
+      // invisible verification, and that verification can fail to complete
+      // in GitHub Actions specifically. One real cause (a GPU/WebGL stall
+      // in that verification) was found and fixed via this file's own
+      // top-level test.use({ launchOptions }) above. A second, still-open
+      // cause was found but explicitly NOT chased further (2026-08-26,
+      // maintainer decision) - likely hCaptcha's actual bot-detection
+      // heuristics reacting to a well-known datacenter IP range running
+      // pure browser automation, which is close to what it's designed to
+      // catch. This test never fails locally and stays @real-email
+      // (non-blocking CI step) - an occasional CI failure here is expected
+      // and documented, not a new bug to re-investigate from scratch.
       const payButton = page.getByRole('button', { name: /Subscribe|Pay/ });
       await expect(payButton).toBeVisible();
       await payButton.click();
