@@ -37,3 +37,12 @@ export async function stripeListCardPaymentMethods(customerId: string): Promise<
   const result = await stripeRequest('GET', `/payment_methods?customer=${customerId}&type=card&limit=100`);
   return result.data ?? [];
 }
+
+export async function stripeFindSubscription(customerId: string): Promise<{ id: string; cancelAtPeriodEnd: boolean }> {
+  const result = await stripeRequest('GET', `/subscriptions?customer=${customerId}&status=all&limit=1`);
+  if (!result.data?.length) {
+    throw new Error(`No subscription found for Stripe customer ${customerId}`);
+  }
+  const sub = result.data[0];
+  return { id: sub.id, cancelAtPeriodEnd: sub.cancel_at_period_end };
+}

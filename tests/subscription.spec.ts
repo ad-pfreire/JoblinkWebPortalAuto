@@ -5,11 +5,13 @@ import { test, expect, Page, devices } from '@playwright/test';
 import { requireEnv } from './utils/env';
 import { getVerificationLink } from './utils/email';
 import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from './utils/account';
+import { stripeFindCustomerByEmail, stripeFindSubscription } from './utils/stripe';
 
 const BASE_URL = requireEnv('BASE_URL');
 
 let disposableUsername: string;
 let disposablePassword: string;
+let disposableEmail: string;
 
 // Logs in with the one disposable account registered once in beforeAll below
 // and lands on /company - the default first tab after login. Mirrors
@@ -278,6 +280,7 @@ test.describe('Subscription', () => {
     const emailAlias = generateUniqueEmailAlias();
     disposableUsername = generateUsernameFromEmail(emailAlias);
     disposablePassword = requireEnv('TEST_REGISTER_PASSWORD');
+    disposableEmail = emailAlias;
     const registeredAt = new Date();
 
     await registerNewAccount(page, emailAlias);
@@ -752,6 +755,16 @@ test.describe('Subscription', () => {
       await expect(page.getByText('Currently Subscribed!', { exact: true })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Resume Subscription', exact: true })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Cancel Subscription', exact: true })).toHaveCount(0);
+
+      // The part the UI's banner text alone can't prove: ask Stripe
+      // directly whether the real subscription is actually scheduled to
+      // cancel server-side, not just displaying claimed text. Closes the
+      // gap flagged in specs/account-deletion-billing-test-plan.md's
+      // recommendations section - this suite previously asserted entirely
+      // on UI text/toasts for what happens to the real subscription.
+      const stripeCustomerId = await stripeFindCustomerByEmail(disposableEmail);
+      const subAfterCancel = await stripeFindSubscription(stripeCustomerId);
+      expect(subAfterCancel.cancelAtPeriodEnd).toBe(true);
     });
 
     test("7.4 While a cancellation is scheduled, the other (non-active) plan card becomes fully non-interactive and NO 'Continue' button appears anywhere on the page @real-email", async ({
@@ -834,6 +847,13 @@ test.describe('Subscription', () => {
 
       await page.goto(`${BASE_URL}/payments`);
       await expect(page.getByText('**** **** **** 4242', { exact: true }).first()).toBeVisible();
+
+      // Same real-API check as 7.3, in reverse: confirm the resume genuinely
+      // flipped the subscription's cancel_at_period_end back to false
+      // server-side, not just that the UI's toast/banner claims it did.
+      const stripeCustomerId = await stripeFindCustomerByEmail(disposableEmail);
+      const subAfterResume = await stripeFindSubscription(stripeCustomerId);
+      expect(subAfterResume.cancelAtPeriodEnd).toBe(false);
     });
 
     test('7.7 Decline flow (4000 0000 0000 0002) in the Resume Subscription dialog shows the same three-surface error pattern already documented for Payments, and leaves the cancelling state unaffected @real-email', async ({
