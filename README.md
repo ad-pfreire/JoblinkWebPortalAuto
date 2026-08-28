@@ -17,7 +17,7 @@ Once logged in, the portal has two top-level tabs: **Company** (the landing page
 | **Login** | Username/email + password, validation messages, password visibility toggle, Enter-to-submit, redirect-when-authenticated | ✅ | `tests/login-cases.spec.ts` |
 | **Account Registration** | Register form + validation, email verification (real link over IMAP), Complete Profile (name, phone, tools/market/role dropdowns) | ✅ | `tests/account-registration.spec.ts` |
 | **Forgot / Reset Password** | Email request page, reset-password page (code + new password, strength checklist), real end-to-end reset with a real emailed code | ✅ | `tests/forgot-password.spec.ts` |
-| **Account Deletion** | Profile → "Delete Account" confirmation dialog and real deletion | ✅ | `tests/forgot-password.spec.ts` |
+| **Account Deletion** | Profile → "Delete Account" confirmation dialog and real deletion, including its cascade to a real Stripe subscription (active, scheduled-to-cancel, already-lapsed, and different plans) and to MongoDB (including an invited member's own delegated access), plus what happens when a MEMBER rather than the owner deletes themselves | ✅ | `tests/forgot-password.spec.ts`, `tests/account-deletion-billing.spec.ts` |
 | **Profile Settings** (`/profile`) | First/Last name edit + Save, Photo upload/crop, Phone edit, Change Password (modal), Delete Account | ✅ | `tests/profile-settings.spec.ts`, `tests/forgot-password.spec.ts` (real deletion) |
 
 ### Company (`/company`) — first tab, the landing page after login

@@ -140,6 +140,20 @@ const INVITATION_LINK_PATTERN = /(https:\/\/[^\s<]+\/invitation\?token=[A-Za-z0-
 // See the KNOWN GOTCHA on getVerificationLink() above for why this
 // reconnects fresh on every poll iteration instead of holding one
 // connection/lock open for the whole timeout budget.
+//
+// KNOWN GOTCHA, live-verified 2026-08-28 while writing
+// account-deletion-billing-test-plan.md's own live exploration: the `to`
+// filter alone is NOT safe once an invitee address has ANY prior mail in
+// the mailbox (e.g. its own earlier "Job Link Registration Confirmation"
+// email, from a scenario where the invitee registers independently BEFORE
+// being invited, rather than via the invite link itself like
+// teams.spec.ts's test 6.7 always does). A poll can catch the mailbox
+// after only that older, unrelated email is visible via `to` and
+// immediately hard-throw ("no invitation link matched"), never getting a
+// chance to see the real invitation email that arrives moments later.
+// Every caller needs the SUBJECT filter added too - "New Invitation!" is
+// the exact, confirmed-stable subject line for this template (see
+// CLAUDE.md).
 export async function getInvitationLink(toAddress: string, timeoutMs = 150000): Promise<string> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -157,7 +171,7 @@ export async function getInvitationLink(toAddress: string, timeoutMs = 150000): 
     try {
       const lock = await client.getMailboxLock('INBOX');
       try {
-        const uids = await client.search({ to: toAddress }, { uid: true });
+        const uids = await client.search({ to: toAddress, subject: 'New Invitation!' }, { uid: true });
         if (uids && uids.length > 0) {
           const latestUid = uids[uids.length - 1];
           const message = await client.fetchOne(latestUid, { source: true }, { uid: true });
