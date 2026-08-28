@@ -5,11 +5,13 @@ import { test, expect, Page, devices } from '@playwright/test';
 import { requireEnv } from './utils/env';
 import { getVerificationLink } from './utils/email';
 import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from './utils/account';
+import { stripeFindCustomerByEmail, stripeListCardPaymentMethods } from './utils/stripe';
 
 const BASE_URL = requireEnv('BASE_URL');
 
 let disposableUsername: string;
 let disposablePassword: string;
+let disposableEmail: string;
 
 // Logs in with the one disposable account registered once in beforeAll below
 // and lands on /company - the default first tab after login. Mirrors
@@ -403,6 +405,7 @@ test.describe('Payments', () => {
     const emailAlias = generateUniqueEmailAlias();
     disposableUsername = generateUsernameFromEmail(emailAlias);
     disposablePassword = requireEnv('TEST_REGISTER_PASSWORD');
+    disposableEmail = emailAlias;
     const registeredAt = new Date();
 
     await registerNewAccount(page, emailAlias);
@@ -1658,10 +1661,10 @@ test.describe('Payments', () => {
       expect(await paymentHistoryRowCount(page)).toBe(paymentHistoryRowsBefore);
     });
 
-    test("6.5 Submitting the exact same card (same number, expiry, CVC) as the currently-saved one is accepted silently, with no 'this card is already saved' detection @real-email", async ({ page }) => {
+    test("6.5 Submitting the exact same card (same number, expiry, CVC) as the currently-saved one is accepted silently, and never leaves a duplicate Stripe PaymentMethod behind @real-email", async ({ page }) => {
       // Two real SetupIntent confirmation + backend save round-trips back
-      // to back - comfortably exceeds the default 30s test timeout budget
-      // on a slow-but-not-broken run.
+      // to back, plus two real Stripe API calls - comfortably exceeds the
+      // default 30s test timeout budget on a slow-but-not-broken run.
       test.slow();
 
       // 1. Save a valid payment method first (test card 4242 4242 4242
@@ -1670,6 +1673,16 @@ test.describe('Payments', () => {
       await saveValidPaymentMethodAndWaitForCompany(page);
       const card = paymentsSummaryCard(page);
       await expect(card.getByRole('heading', { name: '**** **** **** 4242', exact: true })).toBeVisible();
+
+      // This is the exact "known verification gap" specs/payments-test-plan.md
+      // section 6.5 used to flag as unresolvable from the UI alone: the UI
+      // only ever shows one 'current' card, so it can't tell 'no duplicate
+      // was created' apart from 'a duplicate was created but only the
+      // newest one is displayed'. Now that this project has a Stripe
+      // restricted key (see CLAUDE.md), ask Stripe directly instead of
+      // guessing from the UI.
+      const stripeCustomerId = await stripeFindCustomerByEmail(disposableEmail);
+      const methodsBefore = await stripeListCardPaymentMethods(stripeCustomerId);
 
       // 2. WITHOUT clicking 'Delete Payment Method', go back to /payments
       // and fill the still-visible form again with the SAME card number,
@@ -1691,14 +1704,32 @@ test.describe('Payments', () => {
 
       // Both the /company summary card and /payments' 'Current Payment
       // Method' block show the SAME masked card ('...4242') and expiry as
-      // before, with no visible indication either way of whether this
-      // created a second, technically-duplicate Stripe PaymentMethod object
-      // behind the scenes or reused the existing one - a known black-box
-      // UI-testing limitation (the UI only ever surfaces one 'current'
-      // payment method), not something resolvable from this level.
+      // before - this part was already known from the UI alone.
       await expect(card.getByRole('heading', { name: '**** **** **** 4242', exact: true })).toBeVisible();
       await page.goto(`${BASE_URL}/payments`);
       await expect(page.getByRole('heading', { name: '**** **** **** 4242', exact: true })).toBeVisible();
+
+      // The part the UI genuinely could not answer: ask Stripe directly how
+      // many real card PaymentMethod objects this customer now has.
+      const methodsAfter = await stripeListCardPaymentMethods(stripeCustomerId);
+      test.info().annotations.push({
+        type: '6.5 Stripe PaymentMethod count',
+        description: `before: ${methodsBefore.length} (${methodsBefore.map((m) => m.id).join(', ')}), after: ${methodsAfter.length} (${methodsAfter.map((m) => m.id).join(', ')})`,
+      });
+
+      // Live-verified (2 real runs, same result both times): resubmitting
+      // the identical card is NOT a no-op under the hood - the app's
+      // SetupIntent flow creates a genuinely NEW Stripe PaymentMethod
+      // object every time (a different id, e.g. pm_...FupIB3Qs becoming
+      // pm_...v63B04nn, same card fingerprint) - but it also correctly
+      // DETACHES the old one from the customer as part of the same save,
+      // so the customer's real PaymentMethod count never grows. The
+      // original "known verification gap" is closed: no duplicate is ever
+      // left behind, even though the object backing 'the saved card' is
+      // silently swapped for a new one on every resubmission, identical or
+      // not.
+      expect(methodsAfter.length).toBe(methodsBefore.length);
+      expect(methodsAfter[0].id).not.toBe(methodsBefore[0].id);
     });
 
     test("6.6 With a real active PAID subscription, the button relabels to 'Delete Payment Method & Cancel Subscription' and opens a differently-titled 'Cancel Subscription' dialog instead of 'Remove Payment Method' @real-email", async ({
