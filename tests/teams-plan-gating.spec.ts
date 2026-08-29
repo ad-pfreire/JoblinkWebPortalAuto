@@ -4,7 +4,7 @@
 import { test, expect, Page, devices } from '@playwright/test';
 import { MongoClient } from 'mongodb';
 import { requireEnv } from './utils/env';
-import { getVerificationLink } from './utils/email';
+import { getVerificationLink, getInvitationLink } from './utils/email';
 import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from './utils/account';
 
 const BASE_URL = requireEnv('BASE_URL');
@@ -16,6 +16,10 @@ let disposableUsername: string;
 let disposablePassword: string;
 let stripeCustomerId: string;
 let stripeSubscriptionId: string;
+let memberUsername: string;
+let ownerMongoId: string;
+let memberMongoId: string;
+let memberTierWhileOwnerActive: string | null;
 
 // This file's CI-only Chromium software-rendering flags (same GPU/hCaptcha
 // gotcha documented in CLAUDE.md for subscription.spec.ts - this file's
@@ -123,14 +127,13 @@ async function attachClockAndAdvancePastPeriodEnd(customerId: string, currentPer
   await pollTestClockUntilReady(clock.id, 180_000);
 }
 
-// --- MongoDB read-only helper ---
+// --- MongoDB read-only helpers ---
 //
 // HARD RULE, no exceptions: this connection is a credential shared with
 // real people outside this project, approved for READ-ONLY use on this
-// investigation specifically (see CLAUDE.md). This is the ONLY function
-// in this file that touches MongoDB - it must never call anything but
-// find()/findOne(). Never add an insert/update/delete call here or
-// anywhere else in this file.
+// investigation specifically (see CLAUDE.md). Every function in this
+// section must never call anything but find()/findOne(). Never add an
+// insert/update/delete call here or anywhere else in this file.
 async function getTierForStripeCustomer(customerId: string): Promise<string | null> {
   const client = new MongoClient(MONGO_URI);
   try {
@@ -140,6 +143,35 @@ async function getTierForStripeCustomer(customerId: string): Promise<string | nu
     if (!userDoc) return null;
     const tierDoc = await db.collection('tier_subscription_view').findOne({ user_id: userDoc._id.toString() });
     return tierDoc?.tier ?? null;
+  } finally {
+    await client.close();
+  }
+}
+
+// Added 2026-08-28 to extend this file's own finding 4 with a member: an
+// invited/added member's delegated tier was already confirmed (in
+// account-deletion-billing.spec.ts) to never get elevated to the owner's
+// paid tier, on a still-active Pro account. This file's own real Stripe
+// Test Clock is the natural place to also confirm that stays true - and
+// stays consistent - once the owner's subscription genuinely LAPSES, not
+// just while it's active. See specs/account-deletion-billing-test-plan.md's
+// recommendations section for the original suggestion.
+async function getUserByEmail(email: string) {
+  const client = new MongoClient(MONGO_URI);
+  try {
+    await client.connect();
+    return await client.db().collection('users').findOne({ email });
+  } finally {
+    await client.close();
+  }
+}
+
+async function getDelegatedMembershipTier(ownerId: string, memberId: string): Promise<string | null> {
+  const client = new MongoClient(MONGO_URI);
+  try {
+    await client.connect();
+    const doc = await client.db().collection('account_memberships').findOne({ account_id: ownerId, user_id: memberId });
+    return doc?.tier ?? null;
   } finally {
     await client.close();
   }
@@ -156,6 +188,42 @@ async function loginAsDisposableAndGoToCompany(page: Page) {
   await page.locator('button[type="submit"]').click();
   await expect(page).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
   await page.goto(`${BASE_URL}/company`);
+}
+
+// Generic login for the second (member) disposable account - every
+// disposable account in this project shares the same TEST_REGISTER_PASSWORD
+// value, so disposablePassword works for both.
+async function loginAs(page: Page, username: string) {
+  await page.goto(`${BASE_URL}/login`);
+  await page.locator('input[name="username"]').fill(username);
+  await page.locator('input[name="password"]').fill(disposablePassword);
+  await page.locator('button[type="submit"]').click();
+  await expect(page).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
+}
+
+// Reuses the exact invite -> real email -> accept pattern already proven in
+// teams.spec.ts test 6.7 and account-deletion-billing.spec.ts.
+async function inviteAndAcceptMember(ownerPage: Page, browser: import('@playwright/test').Browser, memberEmail: string, memberUsernameArg: string) {
+  await ownerPage.goto(`${BASE_URL}/teams/members`);
+  await ownerPage.getByRole('button', { name: 'Invite Member' }).click();
+  await expect(ownerPage.getByRole('heading', { name: 'Invite Member' })).toBeVisible();
+  const combobox = ownerPage.getByRole('combobox', { name: 'Add People by Email' });
+  await combobox.click();
+  await combobox.pressSequentially(memberEmail);
+  await ownerPage.keyboard.press('Enter');
+  await ownerPage.getByRole('button', { name: 'Invite' }).click();
+  await expect(ownerPage.getByText('Your invitation(s) have been sent.', { exact: true })).toBeVisible();
+
+  const invitationLink = await getInvitationLink(memberEmail, 240_000);
+
+  const memberContext = await browser.newContext({ ...devices['Desktop Chrome'] });
+  const memberPage = await memberContext.newPage();
+  await loginAs(memberPage, memberUsernameArg);
+  await memberPage.goto(invitationLink);
+  await expect(memberPage.getByText('You’ve been invited!', { exact: true })).toBeVisible();
+  await memberPage.getByTestId('accept-btn').click();
+  await expect(memberPage).toHaveURL(`${BASE_URL}/company`, { timeout: 15_000 });
+  await memberContext.close();
 }
 
 const SELECTED_CARD_BACKGROUND = 'rgba(255, 196, 0, 0.25)';
@@ -213,14 +281,17 @@ test.describe('Teams Plan Gating', () => {
       'Disposable single-account state built up sequentially across this file; runs once serially on chromium to avoid cross-project races, redundant registrations, and extra real-email load on the other 2 projects.'
     );
 
-    // This setup does a lot of real, slow work: registration + a real
-    // email + a real Stripe Checkout purchase + a real in-app
-    // cancellation + creating and advancing a real Stripe test clock
-    // (itself live-verified to take real wall-clock time to process - up
-    // to roughly a minute for a full-period advance). Generous budget,
-    // matching subscription.spec.ts's own beforeAll reasoning for the
-    // same class of real-email + real-Stripe setup.
-    test.setTimeout(960_000);
+    // This setup does a lot of real, slow work: TWO account registrations
+    // (owner + member) each with their own real verification email, a real
+    // invitation email + accept round trip, a real Stripe Checkout
+    // purchase, a real in-app cancellation, and creating/advancing a real
+    // Stripe test clock (itself live-verified to take real wall-clock time
+    // to process - up to roughly a minute for a full-period advance).
+    // Bumped from the original 960_000 (16min, single-account budget) once
+    // the second account + invite/accept was added 2026-08-28 - generous
+    // headroom for two real email round trips landing back-to-back, not a
+    // tight fit.
+    test.setTimeout(1_800_000);
 
     // browser.newPage() alone drops this project's configured
     // devices['Desktop Chrome'] context options (notably the user agent),
@@ -275,6 +346,43 @@ test.describe('Teams Plan Gating', () => {
     await expect(payButton).toBeVisible();
     await payButton.click();
     await expect(page).toHaveURL(/\/subscription\?success=true/, { timeout: 45_000 });
+
+    // 2b. While the owner is still genuinely Pro/active (before any
+    // cancellation), register a second disposable MEMBER account, invite
+    // them into the owner's company, and accept - reusing the exact
+    // invite/accept pattern already proven in teams.spec.ts test 6.7 /
+    // account-deletion-billing.spec.ts. Capture the member's delegated
+    // tier NOW, while the owner is unambiguously paid/active, as the
+    // "before" half of extending finding 4 across a real lapse (see
+    // specs/account-deletion-billing-test-plan.md's recommendations
+    // section for the original suggestion).
+    const memberSetupContext = await browser.newContext({ ...devices['Desktop Chrome'] });
+    const memberSetupPage = await memberSetupContext.newPage();
+    const memberEmailAlias = generateUniqueEmailAlias();
+    memberUsername = generateUsernameFromEmail(memberEmailAlias);
+    const memberRegisteredAt = new Date();
+    await registerNewAccount(memberSetupPage, memberEmailAlias);
+    const memberVerificationLink = await getVerificationLink(memberEmailAlias, memberRegisteredAt, 900_000);
+    await memberSetupPage.goto(memberVerificationLink);
+    await expect(memberSetupPage).toHaveURL(`${BASE_URL}/login`);
+    await memberSetupPage.locator('input[name="username"]').fill(memberUsername);
+    await memberSetupPage.locator('input[name="password"]').fill(disposablePassword);
+    await memberSetupPage.locator('button[type="submit"]').click();
+    await expect(memberSetupPage).toHaveURL(`${BASE_URL}/complete-profile`);
+    await completeProfile(memberSetupPage);
+    await expect(memberSetupPage).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
+    await memberSetupContext.close();
+
+    await inviteAndAcceptMember(page, browser, memberEmailAlias, memberUsername);
+
+    const ownerUserDoc = await getUserByEmail(emailAlias);
+    const memberUserDoc = await getUserByEmail(memberEmailAlias);
+    if (!ownerUserDoc || !memberUserDoc) {
+      throw new Error('Could not resolve owner/member Mongo user documents after invite/accept - aborting, every test below assumes both exist.');
+    }
+    ownerMongoId = String(ownerUserDoc._id);
+    memberMongoId = String(memberUserDoc._id);
+    memberTierWhileOwnerActive = await getDelegatedMembershipTier(ownerMongoId, memberMongoId);
 
     // 3. Schedule a REAL cancellation via the app's own Cancel
     // Subscription -> Finish Cancellation flow (matches
@@ -396,6 +504,30 @@ test.describe('Teams Plan Gating', () => {
       const tier = await getTierForStripeCustomer(stripeCustomerId);
       expect(tier).not.toBeNull();
       expect(['pro', 'invoice', 'invoicing']).not.toContain(tier);
+    });
+  });
+
+  test.describe("A Member's Delegated Tier Across a Real Subscription Lapse", () => {
+    test("5.1 While the owner was still genuinely Pro/active, the invited member's own delegated tier was never elevated @real-email", async () => {
+      // Extends account-deletion-billing.spec.ts's own finding (inviting or
+      // adding a member to a paid account never elevates that member's
+      // delegated tier) with this file's own genuinely-lapsed account -
+      // this is the "before" half, captured in beforeAll while the owner
+      // was unambiguously paid/active, before any cancellation.
+      expect(memberTierWhileOwnerActive).not.toBeNull();
+      expect(['pro', 'invoice', 'invoicing']).not.toContain(memberTierWhileOwnerActive);
+    });
+
+    test("5.2 After the owner's subscription genuinely LAPSED, the member's delegated tier is exactly unchanged from before the lapse @real-email", async () => {
+      // The "after" half: re-query the same delegated membership row, now
+      // that the owner has genuinely lapsed to Free (confirmed in
+      // beforeAll's own step 5, and independently re-confirmed by test 4.1
+      // above for the owner). Confirms the member's tier was neither
+      // incorrectly granted while the owner was paid (5.1) NOR left
+      // incorrectly elevated/corrupted by the lapse transition itself.
+      const memberTierAfterLapse = await getDelegatedMembershipTier(ownerMongoId, memberMongoId);
+      expect(memberTierAfterLapse).toBe(memberTierWhileOwnerActive);
+      expect(['pro', 'invoice', 'invoicing']).not.toContain(memberTierAfterLapse);
     });
   });
 });
