@@ -8,7 +8,7 @@ This README doubles as a living map of the portal: which areas are automated tod
 
 Legend: ✅ automated · 🟡 partially automated · ❌ not automated yet
 
-Once logged in, the portal has two top-level tabs: **Company** (the landing page) and **Teams**. Everything below is organized to match that actual navigation — live-verified against pre-staging, not assumed. (An earlier version of this map listed a standalone "Jobs" area; that doesn't exist as a navigable section anywhere in the app — "Add New Jobs" is just one feature bullet inside the Subscription tab's plan-comparison card, see below. Removed to avoid pointing anyone at a page that isn't there.)
+Once logged in, the portal has two top-level tabs: **Company** (the landing page) and **Teams**. Everything below is organized to match that actual navigation — live-verified against pre-staging, not assumed.
 
 ### Auth & account
 
