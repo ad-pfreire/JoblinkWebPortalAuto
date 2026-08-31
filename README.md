@@ -31,7 +31,7 @@ Six cards on one page: Company Details and Logo Upload on their own, then Integr
 | **Integrations** | Lists QuickBooks and Calendar; "Manage integrations" button opens an in-page modal with a Connect/Manage table, a Status column, and a note that only one work-order tool can be linked at a time | ❌ | — |
 | **Payments** (summary card) | Shows "No Payment Method" when unset; "Manage Payments" link goes to the full **`/payments`** page — Stripe-hosted Billing Address + Card form, "Redeem Coupon" | ✅ | `tests/payments.spec.ts` |
 | **Subscription** (summary card) | Shows current plan name + trial end date; "Manage Subscription" link goes to the full **`/subscription`** page — Free / Job Link Pro / Job Link Pro + Invoicing plan comparison, each listing feature bullets like "Add New Jobs", "Inspection Checklists", "Photos and Notes", "Customer and Equipment History" (marketing copy on the comparison card, not a real in-app "Jobs" section); covers plan selection, Monthly/Yearly toggle, first purchase via real Stripe Checkout, in-app upgrade/downgrade, cancel/resume, and edge cases | ✅ (24/25 — 1 known flaky, see below) | `tests/subscription.spec.ts` |
-| **Payment History** | Table: Status / Date / Title / Amount / Billing ID / Invoice; "No Payment History" placeholder when empty | ❌ | — |
+| **Payment History** | Table: Status / Date / Title / Amount / Billing ID / Invoice; "No Payment History" placeholder when empty; sortable-*looking* headers that don't actually sort (likely bug); cursor-based pagination; cross-verified against Stripe's own API and real downloaded invoice PDF content | ✅ | `tests/payment-history.spec.ts` |
 
 ### Teams (`/teams`) — second tab
 

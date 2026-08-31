@@ -20,6 +20,7 @@
     "dotenv": "^17.4.2",
     "imapflow": "^1.6.5",
     "mailparser": "^3.9.14",
-    "mongodb": "^7.6.0"
+    "mongodb": "^7.6.0",
+    "pdf-parse": "^2.4.5"
   }
 }
