@@ -11,6 +11,9 @@ node_modules/
 specs/
 handoff.md
 
+# Personal learning guide (not shared with the team)
+/learning/
+
 # Environment variables
 .env
 .env.local

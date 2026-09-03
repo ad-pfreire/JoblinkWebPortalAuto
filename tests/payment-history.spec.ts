@@ -17,17 +17,9 @@ let disposableUsername: string;
 let disposablePassword: string;
 let disposableEmail: string;
 
-// This file's CI-only Chromium software-rendering flags (same GPU/hCaptcha
-// gotcha documented in CLAUDE.md for subscription.spec.ts/
-// teams-plan-gating.spec.ts/account-deletion-billing.spec.ts - this file's
-// own beforeAll does a real Stripe Checkout purchase). Lives in this file's
-// own dedicated `chromium-payment-history` project in playwright.config.ts,
-// NOT as a file-level test.use({ launchOptions }) here - see that project's
-// own comment for why a file-level test.use() would break webkit/firefox.
+// This file's CI-only Chromium software-rendering flags (see CLAUDE.md) live in its own dedicated project in playwright.config.ts, not a file-level test.use() here.
 
-// Logs in with the one disposable account registered once in beforeAll below
-// and lands on /company. Mirrors loginAsDisposableAndGoToCompany() in
-// payments.spec.ts/subscription.spec.ts.
+/** Logs in with the disposable account from `beforeAll` and lands on /company. */
 async function loginAsDisposableAndGoToCompany(page: Page) {
   await page.goto(`${BASE_URL}/login`);
   await page.locator('input[name="username"]').fill(disposableUsername);
@@ -37,12 +29,7 @@ async function loginAsDisposableAndGoToCompany(page: Page) {
   await page.goto(`${BASE_URL}/company`);
 }
 
-// Logs in with the shared seed account instead - used ONLY by 1.1, which
-// needs a real company that has never made a purchase (the seed account
-// never touches Payments/Subscription elsewhere in this project - see
-// CLAUDE.md's "Account/company isolation" section). Strictly read-only here:
-// no field on this account is ever read via a mutating action. Mirrors
-// loginAsSeedAndGoToCompany() in company-details.spec.ts/logo-upload.spec.ts.
+/** Logs in with the shared seed account - used ONLY by 1.1, strictly read-only, since it never touches Payments/Subscription elsewhere (see CLAUDE.md). */
 async function loginAsSeedAndGoToCompany(page: Page) {
   await page.goto(`${BASE_URL}/login`);
   await page.locator('input[name="username"]').fill(SEED_USERNAME);
@@ -52,44 +39,7 @@ async function loginAsSeedAndGoToCompany(page: Page) {
   await page.goto(`${BASE_URL}/company`);
 }
 
-// Switches the account's billing interval on its CURRENT plan ('Job Link
-// Pro' throughout this file - no plan-tier change) via /subscription's
-// 'Update Subscription' dialog, producing one real new Payment History row
-// per call. Deliberately names the target interval explicitly ('Monthly' or
-// 'Yearly') rather than blindly re-clicking one fixed toggle button -
-// live-verified in specs/subscription-test-plan.md section 3/4 that
-// 'Monthly' and 'Yearly' are two independently-clickable, named toggle
-// options (a real segmented control), not a single button that flips on
-// every click.
-//
-// LIVE-VERIFIED ROOT CAUSE, not obvious from subscription.spec.ts alone:
-// 'Continue' visually becomes enabled purely from the interval toggle
-// alone, but its click handler is a silent no-op (no dialog opens, no
-// error, no console warning) unless a plan card has ALSO been explicitly
-// clicked at least once first - confirmed by directly reproducing both the
-// broken sequence (toggle interval only, click Continue) and the working
-// one (click the plan card, THEN toggle interval, THEN click Continue) by
-// hand against a real account, several times each, with no timing
-// differences between them. subscription.spec.ts's own Suite 3 never hits
-// this because its very first step is always clicking a plan card
-// (`selectPlanAndContinue`'s `clickPlanCard`) before ever touching the
-// interval toggle - this file's original version skipped that click
-// entirely (assuming the current plan's card counts as "already selected"
-// since the page visually marks it 'Currently Subscribed!'), which turned
-// out to be a real, distinct gap in that assumption, not a flaky race. The
-// current plan's own card is genuinely safe to click here (unlike
-// re-clicking an already-selected card elsewhere in this project, which
-// deselects it) - live-verified this only sets the missing internal
-// selection state without changing anything else.
-// 'toggle' switches away from whichever interval the account is CURRENTLY
-// really on (read live from the toggle group's own 'pressed' state right
-// after navigating), rather than the caller having to track/predict that
-// across several earlier real changes - used by Suite 3.3's own loop, where
-// hardcoding an assumed starting interval would silently desync if an
-// earlier test's own call sequence ever changes (requesting an interval
-// that's already active would leave 'Continue' disabled forever, hanging
-// the loop). beforeAll/1.3 still pass an explicit value where the exact
-// sequence is deliberately documented and doesn't need this flexibility.
+/** Switches billing interval via /subscription's 'Update Subscription' dialog, always clicking the plan card first ('Continue' silently no-ops otherwise, see CLAUDE.md). `'toggle'` switches away from whatever interval is currently active. */
 async function changeSubscriptionInterval(page: Page, interval: 'Monthly' | 'Yearly' | 'toggle') {
   await page.goto(`${BASE_URL}/subscription`);
   await page.getByRole('heading', { name: 'Job Link Pro', exact: true }).click();
@@ -108,26 +58,13 @@ async function changeSubscriptionInterval(page: Page, interval: 'Monthly' | 'Yea
 }
 
 // --- Payment History table locators ---
-//
-// Unlike most other cards on /company (Company Details, Logo Upload,
-// Payments, Subscription - each documented elsewhere in this project as
-// having a duplicate, hidden, mobile-accordion copy of their own heading
-// text), Payment History's own MUI DataGrid renders exactly one real
-// `grid`-role landmark on the page - live-verified via a direct accessibility
-// snapshot while writing specs/payment-history-test-plan.md. Locating by
-// role('grid') directly sidesteps that whole class of duplicate-heading
-// gotcha entirely, rather than needing a card-scoping workaround like the
-// other files use.
+// Unlike other /company cards, this MUI DataGrid renders exactly one real
+// `grid` landmark - no hidden mobile-accordion duplicate to work around.
 function paymentHistoryGrid(page: Page) {
   return page.getByRole('grid');
 }
 
-// Data rows only - excludes the header row. The header row (role='row',
-// containing the columnheaders) is a direct child of the grid, while data
-// rows live inside their own nested `rowgroup` - scoping to that rowgroup
-// specifically is what excludes the header row, since getByRole('row')
-// against the grid directly would otherwise also match the header row (role
-// queries search the full subtree regardless of intermediate containers).
+/** Data rows only, excluding the header row - scoped to the nested `rowgroup` that data rows live in but the header row doesn't. */
 function paymentHistoryDataRows(page: Page) {
   return paymentHistoryGrid(page).getByRole('rowgroup').getByRole('row');
 }
@@ -136,35 +73,7 @@ function paymentHistoryFooter(page: Page) {
   return page.locator('p').filter({ hasText: /^\d+–\d+ of (\d+|more than \d+)$/ });
 }
 
-// Finds a specific row by Billing ID, clicking 'Go to next page' if it
-// isn't on the currently-displayed page - needed for any lookup driven by
-// a full, unpaginated Stripe query (e.g. Suite 7.2's null-description
-// search) rather than by loadCompanyAndGetFirstPageInvoices()'s own
-// page-1-only data. By Suite 7's point in this file, Suite 3.3 has already
-// pushed this account past the 10-row page size, so the account's very
-// FIRST invoice (the oldest - exactly what 7.2 looks for) has fallen onto
-// a later page, live-verified as the real cause of this test's first
-// failure (a 30s locator timeout waiting for a row that was never on page
-// 1 to begin with).
-//
-// Deliberately a bounded for-loop, not a while loop with a hard
-// `expect(row).toHaveCount(1)` assertion after each click - an earlier
-// version of this helper had exactly that assertion, which live-verified
-// broke this exact lookup: if the target row isn't on the very next page
-// either, that assertion throws its own timeout error immediately instead
-// of letting the loop try a further page.
-//
-// SECOND live-verified issue on top of that: `.count()` is a one-shot,
-// non-retrying read (the same general gotcha already documented elsewhere
-// in this project) - it does NOT wait for the grid to finish rendering.
-// Calling this helper right after a fresh page load (as Suite 7.2 does,
-// after its own real Stripe API calls, which normally give the grid
-// plenty of time to settle - but not always, live-verified this can still
-// occasionally read 0 before the grid or the 'Go to next page' button's
-// own enabled state have actually finished settling) can otherwise
-// conclude "not found, and can't go further" before either has genuinely
-// finished loading. A short manual poll on the row count (not a single
-// instantaneous `.count()` read) is what actually waits properly.
+/** Finds a row by Billing ID across pages, polling the row count (not a single `.count()` read) and clicking 'Go to next page' as needed. */
 async function findRowByBillingId(page: Page, billingId: string) {
   for (let attempt = 0; attempt < 5; attempt++) {
     const row = paymentHistoryDataRows(page).filter({ hasText: billingId });
@@ -180,56 +89,12 @@ async function findRowByBillingId(page: Page, billingId: string) {
       throw new Error(`Billing ID ${billingId} not found on any page of the Payment History table (checked ${attempt + 1} page(s)).`);
     }
     await nextButton.click();
-    // A brief settle wait for the new page's rows to render, on top of
-    // the next iteration's own poll - cheap insurance given how expensive
-    // re-running this whole file is.
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(500); // settle wait for the new page's rows to render
   }
   throw new Error(`Billing ID ${billingId} not found within 5 pages of the Payment History table.`);
 }
 
-// Waits for the table's own first-page network response (no lastCursor
-// param) and returns its parsed JSON body - the same
-// `{"metadata":{"hasMore":bool,"lastCursor"?:id},"data":[...]}` shape
-// documented in specs/payment-history-test-plan.md. Triggered by a genuine
-// navigation to /company, matching how a real user would land on this table.
-//
-// LIVE-VERIFIED, matches an already-documented CLAUDE.md gotcha
-// (logo-upload.spec.ts's WEBP-rejection case): calling `response.json()`
-// after `page.waitForResponse()` around a real `page.goto()` navigation can
-// intermittently throw "Response body is not available for a response that
-// was navigated away from" - some client-side router activity this app
-// does shortly after the response resolves can discard the buffered body
-// before it's read, even with no explicit further navigation in this code.
-// Fix: intercept the request with `page.route()`, fetch it ourselves,
-// capture the parsed body deterministically, then `route.fulfill()` so the
-// app still gets the real response - same pattern already proven for that
-// other case, applied here since this helper is the single most-used
-// function in this file and hit the identical race on its very first real
-// run.
-//
-// SECOND live-verified issue on top of that: this app can fire more than
-// one matching request for a single /company load (observed directly - the
-// exact mechanism wasn't pinned down, but a second, redundant request is
-// real). Without a guard, a second concurrent invocation of this same route
-// callback can still be mid-`route.fetch()` when the test itself finishes
-// and tears down the page, throwing "Test ended" from inside the callback
-// and failing the test even though the FIRST invocation already captured
-// everything this function needed. `handled` is set synchronously (no
-// `await` before it), so only the true first invocation - in JS's
-// single-threaded execution order, not wall-clock request order - ever
-// proceeds past the guard; every other matching request, whatever its
-// cause, is left completely untouched via `route.fallback()`.
-// THIRD live-verified issue: the real backend can occasionally return a
-// non-JSON error page (HTML) for this endpoint instead of the expected
-// body - observed during Suite 3.3's own loop of several rapid, real,
-// back-to-back subscription changes, consistent with genuine transient
-// backend/infra load rather than anything wrong with this test's own
-// logic (the same general "expect real flakiness under load, add
-// resilience" pattern already documented elsewhere in this project for
-// this app's real pre-staging backend). Retries the whole navigation a
-// few times if the body fails to parse as JSON, rather than letting one
-// transient bad response fail this expensive-to-rerun file outright.
+/** Navigates to /company and returns the invoices table's first-page response body - intercepted via `page.route()` with a `handled` guard, retrying up to 3x on a non-JSON response (see CLAUDE.md). */
 async function loadCompanyAndGetFirstPageInvoices(page: Page): Promise<{ metadata: { hasMore: boolean; lastCursor?: string }; data: any[] }> {
   for (let attempt = 0; attempt < 3; attempt++) {
     let capturedBody: { metadata: { hasMore: boolean; lastCursor?: string }; data: any[] } | null = null;
@@ -256,10 +121,7 @@ async function loadCompanyAndGetFirstPageInvoices(page: Page): Promise<{ metadat
   throw new Error('Failed to load a valid JSON Payment History response after 3 attempts.');
 }
 
-// Extracts a downloaded PDF's full text content via pdf-parse, given its
-// direct Stripe-hosted URL - used only by Suite 7's content-level
-// cross-checks (Suite 5's own link-behavior scenarios stay lean and never
-// parse content, matching the plan's own suite split).
+/** Extracts a downloaded PDF's full text via pdf-parse, given its Stripe-hosted URL - used only by Suite 7's content-level cross-checks. */
 async function extractPdfText(url: string): Promise<string> {
   const parser = new PDFParse({ url });
   try {
@@ -270,50 +132,24 @@ async function extractPdfText(url: string): Promise<string> {
   }
 }
 
-// Same trade-off already documented and applied throughout this project
-// (payments.spec.ts/subscription.spec.ts/teams-plan-gating.spec.ts/
-// account-deletion-billing.spec.ts): serial + chromium-only avoids racing
-// parallel browser projects/workers on the one disposable company's
-// progressively-growing Payment History built up across this file.
+// Serial + chromium-only: avoids racing parallel browser projects on the one disposable company's growing Payment History (see CLAUDE.md).
 test.describe('Payment History', () => {
   test.describe.configure({ mode: 'serial' });
 
-  // Payment History does not touch the shared seed account for its
-  // populated-state scenarios (only 1.1 does, strictly read-only, for the
-  // empty-state case): every self-registered account gets its own fully
-  // isolated Company/Payments/Subscription record, the same
-  // account-isolation reasoning already established for Payments/
-  // Subscription/Teams (see CLAUDE.md's "Account/company isolation"
-  // section). Register ONE disposable account ONCE here, complete one real
-  // Stripe Checkout purchase (the only "fresh, no payment method yet"
-  // window this account will ever have), then a small number of additional
-  // real in-app interval changes to seed a few Payment History rows with
-  // genuinely distinct amounts/dates/descriptions (including at least one
-  // negative/credit row) - deliberately NOT enough to cross the 10-row
-  // pagination page size yet. Suite 3's own 3.3 test performs however many
-  // additional real changes are needed to cross that boundary, right where
-  // the test plan's own scenario narrative expects it to happen - see that
-  // test's own comment for why this is more robust than pre-generating a
-  // fixed row count here.
+  // Registers ONE disposable account, completes a real Stripe purchase, then
+  // a few more real interval changes to seed rows with distinct
+  // amounts/dates/descriptions (including a credit row) - deliberately not
+  // enough to cross the 10-row page size yet; 3.3 crosses that boundary itself.
   test.beforeAll(async ({ browser, browserName }) => {
-    // See payments.spec.ts's identical guard for why this is needed on
-    // `beforeAll` itself, not just inside `beforeEach` below.
+    // Guarded here too, not just beforeEach - a beforeEach skip doesn't gate beforeAll (see CLAUDE.md).
     test.skip(
       browserName !== 'chromium',
       'Disposable single-company state built up sequentially across this file; runs once serially on chromium to avoid cross-project races, redundant registrations, and extra real-email load on the other 2 projects.'
     );
 
-    // Generous budget for real email delivery plus several real Stripe
-    // round trips (one Checkout purchase, three in-app interval changes) -
-    // matches the scale of other files' own beforeAll timeouts in this
-    // project (e.g. subscription.spec.ts's 960_000ms).
-    test.setTimeout(960_000);
+    test.setTimeout(960_000); // real email delivery + several real Stripe round trips
 
-    // browser.newPage() alone creates a page without this project's
-    // configured devices['Desktop Chrome'] context options (notably the
-    // user agent), which live-verified elsewhere in this project can make a
-    // real verification email never arrive within budget - see
-    // payments.spec.ts's identical comment.
+    // newContext() with the device profile, not bare newPage() - see CLAUDE.md's real-email delivery gotcha.
     const context = await browser.newContext({ ...devices['Desktop Chrome'] });
     const page = await context.newPage();
     const emailAlias = generateUniqueEmailAlias();
@@ -335,12 +171,8 @@ test.describe('Payment History', () => {
     await completeProfile(page);
     await expect(page).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
 
-    // Real Stripe Checkout purchase: 'Job Link Pro', Monthly ($12.00) - the
-    // exact flow already proven in subscription.spec.ts test 4.2. This
-    // produces this account's very first Payment History row - a
-    // straightforward, non-prorated purchase whose Stripe line item
-    // carries a null 'description' (see finding 15/Suite 7.2), the same
-    // shape Suite 1.2/7.2 need.
+    // Real Stripe Checkout purchase: 'Job Link Pro', Monthly - produces this
+    // account's first Payment History row, a non-prorated purchase with a null Stripe line description (needed by 1.2/7.2).
     await page.goto(`${BASE_URL}/subscription`);
     await page.getByRole('heading', { name: 'Job Link Pro', exact: true }).click();
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
@@ -359,25 +191,16 @@ test.describe('Payment History', () => {
     if ((await cardholderNameField.count()) > 0 && !(await cardholderNameField.inputValue())) {
       await cardholderNameField.fill('QA Payment History Test');
     }
-    // Deliberately never touches the 'I am an AI agent...' checkbox - see
-    // subscription.spec.ts test 4.1's identical comment for why (a
-    // live-verified 30-minute tool hang when it was clicked during
-    // exploration).
+    // Never touches the 'I am an AI agent...' checkbox (see subscription.spec.ts test 4.1's comment).
     const payButton = page.getByRole('button', { name: /Subscribe|Pay/ });
     await expect(payButton).toBeVisible();
     await payButton.click();
     await expect(page).toHaveURL(/\/subscription\?success=true/, { timeout: 45_000 });
     await expect(page.getByText('Your subscription has been successfully activated!', { exact: true })).toBeVisible();
 
-    // Three more real in-app interval changes (Yearly, then Monthly, then
-    // Yearly again) - each produces one more real Payment History row,
-    // alternating positive (upgrade to the pricier Yearly interval) and
-    // negative (downgrade credit back to Monthly) amounts, and each row
-    // carries a real, non-null Stripe line description (a proration
-    // line) - giving Suite 1/4's scenarios the variety they need (multiple
-    // distinct rows, at least one negative/credit row, at least one row
-    // with a real description) without yet crossing the 10-row pagination
-    // boundary (4 total rows after this: the purchase plus these 3).
+    // Three more real interval changes (Yearly/Monthly/Yearly) - each adds a
+    // row with a real description, alternating positive/negative amounts,
+    // giving Suite 1/4 the variety they need without crossing the 10-row page size (4 rows total).
     await changeSubscriptionInterval(page, 'Yearly');
     await changeSubscriptionInterval(page, 'Monthly');
     await changeSubscriptionInterval(page, 'Yearly');
@@ -392,33 +215,17 @@ test.describe('Payment History', () => {
     );
   });
 
-  // Safety net on top of loadCompanyAndGetFirstPageInvoices()'s own
-  // 'handled' guard: Playwright's own suggestion when a route callback gets
-  // cut short by test teardown ("route.fetch: Test ended") is exactly this
-  // call - cheap insurance against any route-in-flight edge case the guard
-  // doesn't already cover, given how expensive re-running this whole file
-  // is (a real registration, real email, and a real Stripe Checkout
-  // purchase every time).
+  // Safety net on top of loadCompanyAndGetFirstPageInvoices()'s own 'handled' guard, against any route-in-flight edge case it doesn't already cover.
   test.afterEach(async ({ page }) => {
     await page.unrouteAll({ behavior: 'ignoreErrors' });
   });
 
   test.describe('Payment History — Table Structure and Empty/Populated States', () => {
     test('1.1 A company that has never made a real purchase shows the correct, genuinely-empty Payment History state @real-email', async ({ page }) => {
-      // 1. Log in as the shared seed account (read-only use only) and land
-      // on /company.
+      // 1. Log in as the shared seed account (read-only use only).
       await loginAsSeedAndGoToCompany(page);
-      // 'Payment History' renders as a plain generic text node, not a
-      // heading-role element - live-verified via direct accessibility
-      // snapshot while writing specs/payment-history-test-plan.md. Like
-      // every other card's own title text elsewhere in this project
-      // (Company Details, Logo Upload, Payments - each documented as having
-      // a hidden mobile-accordion duplicate), this text also matches twice
-      // in the DOM - but unlike those other cases, direct DOM inspection
-      // here showed the FIRST match (a 0x0 <h6>) is the hidden one and the
-      // SECOND (a MuiCardHeader-title <span>) is the real, visible one -
-      // `.last()`, not the `.first()` convention used elsewhere in this
-      // project, is what's actually needed for this specific element.
+      // 'Payment History' text matches twice (hidden mobile duplicate +
+      // real) like other cards, but here it's the SECOND match that's real - `.last()`, not this project's usual `.first()`.
       await expect(page.getByText('Payment History', { exact: true }).last()).toBeVisible();
       for (const column of ['Status', 'Date', 'Title', 'Amount', 'Billing ID', 'Invoice']) {
         await expect(page.getByRole('columnheader', { name: column, exact: true })).toBeVisible();
@@ -430,16 +237,13 @@ test.describe('Payment History', () => {
       await expect(page.getByRole('button', { name: 'Go to previous page' })).toBeDisabled();
       await expect(page.getByRole('button', { name: 'Go to next page' })).toBeDisabled();
 
-      // 3. Inspect the underlying network request the table's own initial
-      // load fires - a genuinely empty real dataset, not a client-side
-      // placeholder masking a failed/errored fetch.
+      // 3. The underlying request returns a genuinely empty dataset, not a placeholder masking a failed fetch.
       const body = await loadCompanyAndGetFirstPageInvoices(page);
       expect(body).toEqual({ metadata: { hasMore: false }, data: [] });
     });
 
     test('1.2 A company with real payment history shows correctly structured, correctly formatted rows matching the underlying Stripe invoice data @real-email', async ({ page }) => {
-      // 1. Log in as the disposable account (with real history from
-      // beforeAll) and land on /company.
+      // 1. Log in as the disposable account (real history from beforeAll).
       const body = await (async () => {
         await loginAsDisposableAndGoToCompany(page);
         return loadCompanyAndGetFirstPageInvoices(page);
@@ -456,10 +260,7 @@ test.describe('Payment History', () => {
         const expectedAmountText = invoice.total < 0 ? `-$${Math.abs(Number(expectedAmount)).toFixed(2)}` : `$${expectedAmount}`;
         await expect(row.getByRole('gridcell').nth(3)).toHaveText(expectedAmountText);
         await expect(row.getByRole('gridcell').nth(4)).toHaveText(invoice.number);
-        // A real (non-null) first-line description renders verbatim; a
-        // null one is backfilled by the app with its own synthesized text
-        // (see finding 15/Suite 7.2) - either way the Title cell must be
-        // non-empty, never blank.
+        // A real description renders verbatim; a null one gets a synthesized fallback (see 7.2) - either way, never blank.
         const titleText = await row.getByRole('gridcell').nth(2).textContent();
         expect(titleText?.length).toBeGreaterThan(0);
         if (invoice.lines?.data?.[0]?.description) {
@@ -470,16 +271,14 @@ test.describe('Payment History', () => {
 
     test('1.3 A real subscription change made on /subscription populates a new Payment History row on the very next /company load, with no manual refresh needed @real-email', async ({ page }) => {
       test.slow();
-      // 1. Note the current row count and top row's Billing ID, then
-      // complete a real interval change.
+      // 1. Note the current rows, then complete a real interval change.
       await loginAsDisposableAndGoToCompany(page);
       const before = await loadCompanyAndGetFirstPageInvoices(page);
       const billingIdsBefore = new Set(before.data.map((i: any) => i.number));
 
       await changeSubscriptionInterval(page, 'Monthly');
 
-      // 2. Navigate back to /company (a genuine new navigation) and inspect
-      // the table.
+      // 2. A genuine new navigation to /company shows the new row.
       const after = await loadCompanyAndGetFirstPageInvoices(page);
       expect(after.data.length).toBe(before.data.length + 1);
       const newInvoice = after.data.find((i: any) => !billingIdsBefore.has(i.number));
@@ -491,11 +290,8 @@ test.describe('Payment History', () => {
   });
 
   test.describe('Payment History — Column Sort Headers Appear Interactive But Are Non-Functional (Likely Bug)', () => {
-    // See specs/payment-history-test-plan.md finding 1 and Suite 2 for the
-    // full live-verified reasoning. These assertions capture the CURRENT,
-    // observed (broken) behavior deliberately - if a future release wires
-    // up real sorting, these tests failing is the correct, desired signal
-    // that this section needs updating, not a false alarm to silence.
+    // These assertions capture the CURRENT, broken behavior deliberately -
+    // if a future release wires up real sorting, these tests failing is the correct signal, not a false alarm.
     const sortableColumns = ['Status', 'Date', 'Title', 'Amount', 'Billing ID'];
     sortableColumns.forEach((column, index) => {
       test(`2.${index + 1} LIKELY BUG: clicking the ${column} column header does not reorder rows, and its aria-sort attribute never leaves 'none' @real-email`, async ({ page }) => {
@@ -518,18 +314,8 @@ test.describe('Payment History', () => {
 
     test('2.6 Zero network requests fire as a result of any sort-header click, ruling out a server-side sort as cleanly as a client-side one @real-email', async ({ page }) => {
       await loginAsDisposableAndGoToCompany(page);
-      // Live-verified this test can otherwise intermittently fail: this
-      // app can fire more than one /api/stripe-invoices request for a
-      // single /company load (the same real, live-verified behavior
-      // loadCompanyAndGetFirstPageInvoices() already guards against
-      // elsewhere in this file), with variable timing - a request listener
-      // attached immediately after login can occasionally still catch that
-      // SECOND, delayed, totally unrelated initial-load request within the
-      // 1s observation window below, misattributing it to the header
-      // clicks. Waiting for the network to genuinely go idle first ensures
-      // any such leftover initial-load activity has already settled before
-      // this test starts watching for NEW requests caused specifically by
-      // its own clicks.
+      // Waits for network idle first - this app can fire a second, delayed
+      // initial-load request (see CLAUDE.md) that could otherwise land inside the observation window below and get misattributed to the clicks.
       await page.waitForLoadState('networkidle');
       let requestFired = false;
       const onRequest = (url: string) => {
@@ -569,10 +355,7 @@ test.describe('Payment History', () => {
       const responsePromise = page.waitForResponse((r) => r.url().includes('/api/stripe-invoices'));
       await page.goto(`${BASE_URL}/company`);
       const response = await responsePromise;
-      // Parsed via URL/searchParams rather than string-matching the raw
-      // URL, so this doesn't depend on whether the app's own client code
-      // happens to percent-encode the '[' ']' characters or leaves them
-      // literal on the wire.
+      // Parsed via searchParams, not raw string-matching, so encoding of '[' ']' doesn't matter.
       const params = new URL(response.url()).searchParams;
       expect(params.get('paginationModel[pageSize]')).toBe('10');
     });
@@ -580,11 +363,7 @@ test.describe('Payment History', () => {
     test('3.2 With 10 or fewer total rows, both navigation buttons stay disabled and the footer label shows the true, exact count @real-email', async ({ page }) => {
       await loginAsDisposableAndGoToCompany(page);
       const body = await loadCompanyAndGetFirstPageInvoices(page);
-      // Guard: this scenario only makes sense while still at or under the
-      // page size - if a previous run already pushed this account past 10
-      // (shouldn't happen given this file's own serial, single-run
-      // ordering, but asserted defensively rather than silently
-      // misinterpreting a stale account).
+      // Guard: this scenario only makes sense at or under the page size - asserted defensively rather than silently misreading a stale account.
       expect(body.metadata.hasMore).toBe(false);
       await expect(paymentHistoryFooter(page)).toHaveText(`1–${body.data.length} of ${body.data.length}`);
       await expect(page.getByRole('button', { name: 'Go to previous page' })).toBeDisabled();
@@ -594,16 +373,10 @@ test.describe('Payment History', () => {
     test("3.3 Crossing the 10-row boundary switches the footer to an 'estimated' total and enables 'Go to next page' for the first time @real-email", async ({ page }) => {
       test.slow();
       await loginAsDisposableAndGoToCompany(page);
-      // Repeatedly perform a real interval change until the table's own
-      // backing request reports more than one page exists - self-adjusting
-      // to whatever count beforeAll/earlier tests left this account at,
-      // rather than a hardcoded number of clicks, so this test doesn't need
-      // updating if that seeded row count ever changes. Uses 'toggle' (not
-      // an assumed starting value) since this loop's own starting point
-      // depends on exactly how many real changes earlier tests already
-      // made - see changeSubscriptionInterval()'s own comment for why
-      // guessing wrong here would hang the loop. Capped at 15 iterations as
-      // a safety net (comfortably more than the ~6-7 normally needed).
+      // Loops real interval changes until more than one page exists -
+      // self-adjusting to whatever row count earlier tests left, using
+      // 'toggle' rather than a hardcoded value (see its own comment for
+      // why guessing wrong would hang the loop). Capped at 15 iterations (normally needs ~6-7).
       let body = await loadCompanyAndGetFirstPageInvoices(page);
       let guard = 0;
       while (!body.metadata.hasMore && guard < 15) {
@@ -624,13 +397,7 @@ test.describe('Payment History', () => {
       const firstPage = await loadCompanyAndGetFirstPageInvoices(page);
       expect(firstPage.metadata.hasMore).toBe(true);
 
-      // Same route-interception fix as loadCompanyAndGetFirstPageInvoices()
-      // above (including its own 'handled' guard against a second
-      // concurrent matching request), applied here too rather than reading
-      // the response body directly off a plain waitForResponse() -
-      // defensive against the identical race documented there, even though
-      // this particular response follows a same-page pagination click
-      // rather than a full page.goto().
+      // Same route-interception + 'handled' guard as loadCompanyAndGetFirstPageInvoices() (see CLAUDE.md), applied to this pagination click too.
       let secondPageUrl = '';
       let secondPageBody: { metadata: { hasMore: boolean }; data: any[] } | null = null;
       let secondPageHandled = false;
@@ -701,11 +468,7 @@ test.describe('Payment History', () => {
     test('4.2 Rows sharing the identical DISPLAYED minute are still ordered correctly by a finer-grained real underlying creation time @real-email', async ({ page }) => {
       await loginAsDisposableAndGoToCompany(page);
       const body = await loadCompanyAndGetFirstPageInvoices(page);
-      // Group by the DISPLAYED minute (matching the Date cell's own
-      // to-the-minute formatting), not the raw second-precision
-      // 'created' value - looking for a real coincidence where two rows
-      // rendered the same visible minute string, the same condition the
-      // original live exploration happened to hit.
+      // Groups by the DISPLAYED minute (matching the Date cell's formatting), not the raw second-precision 'created' value.
       const byMinute = new Map<number, any[]>();
       for (const invoice of body.data) {
         const minuteKey = Math.floor(invoice.created / 60);
@@ -737,16 +500,10 @@ test.describe('Payment History', () => {
     test('4.4 An invoice with multiple Stripe line items only surfaces the FIRST line\'s description as Title @real-email', async ({ page }) => {
       await loginAsDisposableAndGoToCompany(page);
       const body = await loadCompanyAndGetFirstPageInvoices(page);
-      // Every real interval-change invoice this file's beforeAll/Suite 3
-      // produces carries exactly 2 line items: a proration credit/charge
-      // (real description) plus the new full-price recurring line (Stripe
-      // itself never generates a description for a plain, non-prorated
-      // recurring line - see finding 15/Suite 7.2) - so line[1]'s
-      // description is null here, unlike the plan's own original example
-      // (a plan-TIER change, which happens to get a real description on
-      // both lines). Either shape proves the same underlying rule (only
-      // line[0] ever surfaces as Title), so this only requires >= 2 lines,
-      // not a described second line specifically.
+      // Every real interval-change invoice here has exactly 2 line items - a
+      // proration line (real description) plus a plain recurring line
+      // (Stripe never generates a description for that one, see 7.2). Only
+      // needs >= 2 lines, not a described second line specifically, to prove the same underlying rule.
       const multiLineInvoice = body.data.find((i: any) => (i.lines?.data?.length ?? 0) >= 2);
       expect(multiLineInvoice, 'expected at least one of beforeAll\'s real interval-change invoices to carry 2 line items').toBeTruthy();
 
@@ -803,10 +560,8 @@ test.describe('Payment History', () => {
 
       const response: APIResponse = await request.get(href!);
       expect(response.ok()).toBe(true);
-      // Live-verified: Stripe serves this as 'application/octet-stream',
-      // not 'application/pdf' - the Content-Type header isn't a reliable
-      // signal here. Checking the real PDF magic bytes ('%PDF') at the
-      // start of the body is what actually confirms this is a genuine PDF.
+      // Stripe serves this as 'application/octet-stream', not
+      // 'application/pdf' - checking the real PDF magic bytes ('%PDF') is what actually confirms it.
       const body = await response.body();
       expect(body.subarray(0, 4).toString('utf8')).toBe('%PDF');
     });
@@ -819,18 +574,11 @@ test.describe('Payment History', () => {
       const statusCell = row.getByRole('gridcell').nth(0);
       await statusCell.click();
       await expect(page).toHaveURL(`${BASE_URL}/company`);
-      // No MUI DataGrid row-selection state gets applied either - the
-      // 'aria-selected' attribute is genuinely absent (not merely 'false'),
-      // matching specs/payment-history-test-plan.md finding 10's direct DOM
-      // inspection.
+      // No row-selection state applied - 'aria-selected' is genuinely absent, not merely 'false'.
       expect(await row.getAttribute('aria-selected')).toBeNull();
     });
 
-    // 6.2 (a genuine Stripe Test-Clock-driven subscription lapse doesn't
-    // hide/corrupt prior Payment History rows) is already live-verified in
-    // tests/teams-plan-gating.spec.ts's own Suite 3.2 - cited, not
-    // re-derived here, per specs/payment-history-test-plan.md's own scope
-    // guidance.
+    // 6.2 (a real Test-Clock-driven lapse doesn't hide/corrupt prior rows) is covered in teams-plan-gating.spec.ts's Suite 3.2, not re-derived here.
 
     test("6.3 /company's own auth guard covers this table too @real-email", async ({ page }) => {
       await page.goto(`${BASE_URL}/company`);
@@ -854,16 +602,9 @@ test.describe('Payment History', () => {
         expect(stripeInvoice, `Stripe has no invoice matching Billing ID ${appInvoice.number}`).toBeTruthy();
         expect(appInvoice.total).toBe(stripeInvoice.total);
         expect(appInvoice.status).toBe(stripeInvoice.status);
-        // NOT comparing invoicePdf/invoice_pdf directly - live-verified
-        // this field is NOT a stable value to compare across two
-        // independent API calls for the same invoice: Stripe generates a
-        // fresh, differently-signed PDF URL on every single request (the
-        // long token in the URL path changes each time, not just a query
-        // param), so the app's own fetch and this test's separate fetch
-        // will always legitimately differ here even when both are
-        // completely correct. Confirming the PDF link RESOLVES and its
-        // content matches is already covered elsewhere (Suite 5.1's link
-        // check, Suite 7.3/7.4's real content extraction).
+        // NOT comparing invoicePdf/invoice_pdf directly - Stripe generates a
+        // fresh, differently-signed URL on every request, so two independent
+        // calls always legitimately differ (link/content checks live in 5.1/7.3/7.4 instead).
       }
     });
 
@@ -871,22 +612,18 @@ test.describe('Payment History', () => {
       await loginAsDisposableAndGoToCompany(page);
       const customerId = await stripeFindCustomerByEmail(disposableEmail);
       const stripeResult = await stripeRequest('GET', `/invoices?customer=${customerId}&limit=100`);
-      // The very first, non-prorated purchase invoice always has a null
-      // Stripe line description - a straightforward `"type": "subscription"`
-      // line never gets an auto-generated description from Stripe, only a
-      // proration `"type": "invoiceitem"` line does.
+      // A plain "type": "subscription" line never gets an auto-generated
+      // Stripe description - only a proration "invoiceitem" line does - so
+      // the account's very first purchase invoice always has a null one.
       const nullDescriptionInvoice = stripeResult.data.find((i: any) => i.lines?.data?.[0]?.description === null);
       expect(nullDescriptionInvoice, 'expected beforeAll\'s initial purchase invoice to have a null Stripe line description').toBeTruthy();
 
-      // This is the account's very first (oldest) invoice, which by this
-      // point in the file has fallen onto page 2 - see findRowByBillingId()
-      // for why a plain page-1-only lookup isn't enough here.
+      // This is the account's oldest invoice, fallen onto page 2 by now (see findRowByBillingId()).
       const row = await findRowByBillingId(page, nullDescriptionInvoice.number);
       const titleText = await row.getByRole('gridcell').nth(2).textContent();
       expect(titleText).toBeTruthy();
       expect(titleText).not.toBe('');
-      // The synthesized fallback names the real plan, distinguishing it
-      // from a literal proxy of the (null) raw description.
+      // The synthesized fallback names the real plan, not a literal proxy of the null description.
       expect(titleText).toContain(nullDescriptionInvoice.lines.data[0].plan.name);
     });
 
@@ -898,14 +635,9 @@ test.describe('Payment History', () => {
       expect(positiveInvoice).toBeTruthy();
 
       const pdfText = await extractPdfText(positiveInvoice.invoicePdf ?? positiveInvoice.invoice_pdf);
-      // Live-verified via direct byte-level inspection: the character
-      // connecting the Billing ID's prefix and number in the PDF's own
-      // 'Invoice number' line is NOT reliably a space (or the original
-      // hyphen) - one real invoice rendered a literal NULL byte (char code
-      // 0, confirmed via charCodeAt) there instead, a pdf-parse/font-encoding
-      // artifact specific to this field. Matching via a single-character
-      // wildcard instead of assuming any specific connector is what
-      // actually holds up.
+      // The character connecting the Billing ID's prefix/number in the PDF
+      // isn't reliably a space or hyphen - one invoice rendered a literal
+      // NULL byte there (see CLAUDE.md), so match via a single-char wildcard instead of a fixed connector.
       const [prefix, suffix] = positiveInvoice.number.split('-');
       expect(pdfText).toMatch(new RegExp(`${prefix}.${suffix}`));
       const expectedTotal = `$${(positiveInvoice.total / 100).toFixed(2)}`;
@@ -920,48 +652,28 @@ test.describe('Payment History', () => {
       expect(creditInvoice, 'expected beforeAll to have produced at least one credit/negative-amount row').toBeTruthy();
 
       const pdfText = await extractPdfText(creditInvoice.invoicePdf ?? creditInvoice.invoice_pdf);
-      // The table's own Amount cell for this exact invoice IS negative -
-      // asserted here for contrast with the PDF's own text below.
+      // Table's own Amount cell IS negative, for contrast with the PDF text below.
       const row = paymentHistoryDataRows(page).filter({ hasText: creditInvoice.number });
       const expectedAmount = `-$${Math.abs(creditInvoice.total / 100).toFixed(2)}`;
       await expect(row.getByRole('gridcell').nth(3)).toHaveText(expectedAmount);
 
-      // The PDF itself never renders a minus sign for this same invoice -
-      // see specs/payment-history-test-plan.md finding 16 for the full
-      // live-verified reasoning (the credit is represented via a separate
-      // 'Applied balance' line instead, netting to a $0.00 due amount).
+      // The PDF never renders a minus sign - the credit is a separate 'Applied balance' line, netting to $0.00 due.
       expect(pdfText).not.toContain('-$');
       expect(pdfText).toContain('Applied balance');
     });
 
     test('7.5 MongoDB holds no local record of this table\'s data whatsoever @real-email', async ({ page }) => {
-      // Scoped to only the 2 specific, plausible-by-name collections (see
-      // findAnyCollectionReferencing()'s own comment for why a full
-      // ~63-collection database sweep was dropped - it was live-verified
-      // to be too slow to depend on, exceeding even an 8-minute budget on
-      // one real run). Still generous headroom beyond this, since it's a
-      // shared database with other real usage outside this project's
-      // control.
-      test.setTimeout(120_000);
+      test.setTimeout(120_000); // scoped to 2 specific collections (see CLAUDE.md - a full database sweep is too slow to depend on)
 
       await loginAsDisposableAndGoToCompany(page);
       const body = await loadCompanyAndGetFirstPageInvoices(page);
       const user = await getUserByEmail(disposableEmail);
       expect(user, 'expected the disposable account to exist in MongoDB').toBeTruthy();
 
-      // Deliberately searches ONLY by each invoice's own real Stripe id
-      // (e.g. 'in_...'), NOT by the account's own Mongo _id/stripe_id -
-      // live-verified while writing this test that including the
-      // account's own identity values makes this assertion trivially
-      // fail for ANY real account: `users`/`account_memberships`/
-      // `team_memberships`/`tier_subscription_view` all correctly
-      // reference a user's own _id/stripe_id as part of completely
-      // unrelated, expected account/membership bookkeeping - that's not
-      // evidence of Payment History being cached anywhere, just this
-      // helper's search criteria being too broad. An invoice id, by
-      // contrast, is never a legitimate value for any of those
-      // collections' own fields, so a hit on ANY collection here is a
-      // real, meaningful signal.
+      // Searches ONLY by each invoice's own Stripe id, not the account's own
+      // _id/stripe_id - those legitimately appear in unrelated
+      // account/membership bookkeeping in other collections, which would
+      // trivially fail this for ANY account. An invoice id is never a legitimate value there, so any hit is a real signal.
       const invoiceIds = body.data.map((i: any) => i.id).filter(Boolean);
       const hits = await findAnyCollectionReferencing(invoiceIds, ['stripe_invoices', 'invoices']);
       expect(hits, `expected zero Mongo collections to reference this account's real invoices, found: ${JSON.stringify(hits)}`).toEqual([]);

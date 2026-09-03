@@ -53,28 +53,15 @@ test.describe('Account Registration', () => {
   });
 });
 
-// This test is the only one in the file that actually reads a real email
-// back over IMAP — its pass/fail depends partly on Mandrill/SES delivery
-// timing, which is outside the app's or the test's control (observed
-// anywhere from ~20s up to over 2 minutes under load). It's kept in its own
-// describe block with a local retry so a one-off slow delivery doesn't
-// require a manual re-run: the other tests in this file are pure UI/backend
-// logic and should NEVER need a retry to pass, so this is scoped narrowly
-// instead of raising retries for the whole suite.
+// The only test here reading a real email over IMAP - kept in its own
+// describe with a local retry, since delivery timing is outside this test's
+// control and the rest of the file should never need a retry to pass.
 test.describe('Account Registration - full flow with real email', () => {
   test.describe.configure({ retries: 1 });
 
   test('should verify email, validate and complete the profile form, and log in after registering @real-email', async ({ page, browserName }) => {
-    // The backend flow this test exercises is browser-agnostic, so it only
-    // runs on chromium — running it 3x in parallel (once per browser
-    // project) each adds real signups competing for the same Mandrill/SES
-    // send queue as every other registration test in this file, which
-    // pushed delivery time past even a generous timeout during full-suite
-    // runs.
+    // Browser-agnostic backend flow - runs once on chromium, not 3x, to avoid tripling load on the shared email pipeline.
     test.skip(browserName !== 'chromium', 'Backend-only flow; runs once to avoid tripling load on the real email pipeline.');
-
-    // This test reads the real verification email over IMAP and needs to
-    // wait for it to arrive, so it gets a generous timeout budget.
     test.setTimeout(240_000);
 
     // 1. Register a new, run-unique account.
@@ -103,10 +90,7 @@ test.describe('Account Registration - full flow with real email', () => {
     await expect(page).toHaveURL(`${BASE_URL}/complete-profile`);
     await completeProfile(page);
 
-    // 6. Finishing the profile logs the user into the app. A brand-new
-    // account with no company yet has a hidden dialog in the DOM whose title
-    // is also "Company Details", making that text ambiguous here (unlike an
-    // established account) — the selected "Company" tab is unambiguous.
+    // 6. Logs in - checks the selected tab, not "Company Details" text (a hidden dialog shares that title on a brand-new account).
     await expect(page).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
     await expect(page.getByRole('tab', { name: 'Company', selected: true })).toBeVisible();
   });

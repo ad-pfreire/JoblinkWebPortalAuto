@@ -21,29 +21,11 @@ let ownerMongoId: string;
 let memberMongoId: string;
 let memberTierWhileOwnerActive: string | null;
 
-// This file's CI-only Chromium software-rendering flags (same GPU/hCaptcha
-// gotcha documented in CLAUDE.md for subscription.spec.ts - this file's
-// own beforeAll also does a real Stripe Checkout purchase). Lives in this
-// file's own dedicated `chromium-teams-plan-gating` project below and in
-// playwright.config.ts, NOT as a file-level test.use({ launchOptions })
-// here - live-verified in subscription.spec.ts's own history that a
-// file-level test.use({ launchOptions }) gets applied across every
-// project attempting the file when CI runs without a --project filter,
-// crashing webkit/firefox outright (they don't understand Chromium
-// flags). See the `chromium-teams-plan-gating` project's own comment in
-// playwright.config.ts.
+// This file's CI-only Chromium software-rendering flags (see CLAUDE.md) live in its own dedicated project in playwright.config.ts, not a file-level test.use() here.
 
 // --- Stripe REST API helpers ---
-//
-// This file drives a real Stripe Test Clock directly via the REST API
-// (not through the browser) to simulate a subscription genuinely lapsing
-// to Free - something no amount of UI interaction can do within a test
-// run's timespan. See CLAUDE.md's "Optional: Stripe restricted key..."
-// section and specs/teams-plan-gating-test-plan.md for the full
-// reasoning. Plain fetch() with manual Basic Auth, matching the exact
-// pattern already live-verified via curl throughout this investigation -
-// no need for the full `stripe` SDK for the handful of calls this file
-// makes.
+// Drives a real Stripe Test Clock directly via the REST API to simulate a
+// subscription genuinely lapsing to Free - no UI interaction can do that within a test run's timespan (see CLAUDE.md).
 async function stripeRequest(method: 'GET' | 'POST', path: string, body?: Record<string, string>) {
   const headers: Record<string, string> = {
     Authorization: `Basic ${Buffer.from(`${STRIPE_KEY}:`).toString('base64')}`,
@@ -82,10 +64,7 @@ async function stripeFindActiveSubscription(customerId: string): Promise<{ id: s
   return { id: sub.id, currentPeriodEnd };
 }
 
-// Polls a test clock until it's done processing (status 'ready'), or
-// throws if it fails. Live-verified this genuinely takes real wall-clock
-// time (a few seconds up to roughly a minute for a full-period advance in
-// this project's own exploration) - not instantaneous.
+/** Polls a test clock until 'ready', or throws on failure - a full-period advance can take up to roughly a minute. */
 async function pollTestClockUntilReady(clockId: string, maxWaitMs = 120_000) {
   const deadline = Date.now() + maxWaitMs;
   while (Date.now() < deadline) {
@@ -99,16 +78,7 @@ async function pollTestClockUntilReady(clockId: string, maxWaitMs = 120_000) {
   throw new Error(`Test clock ${clockId} did not reach 'ready' within ${maxWaitMs}ms`);
 }
 
-// Creates a test clock attached to an EXISTING customer (live-verified
-// this works without any 'Automations' blocker on this Stripe account -
-// see CLAUDE.md), then advances it past the subscription's real period
-// end so the already-scheduled real cancellation (done via the app's own
-// UI just before this is called) actually takes effect. Deliberately does
-// NOT delete the clock afterward - this project's own live exploration
-// found cleanup isn't required (test clocks auto-expire after 30 days
-// per Stripe's own retention), and deleting one also deletes its attached
-// customer, which would remove the very account this test just spent this
-// whole beforeAll building.
+/** Attaches a test clock to an existing customer and advances it past the period end, so the scheduled cancellation takes effect (never deleted after - see CLAUDE.md). */
 async function attachClockAndAdvancePastPeriodEnd(customerId: string, currentPeriodEnd: number): Promise<void> {
   const nowSeconds = Math.floor(Date.now() / 1000);
   const clock = await stripeRequest('POST', '/test_helpers/test_clocks', {
@@ -118,22 +88,14 @@ async function attachClockAndAdvancePastPeriodEnd(customerId: string, currentPer
   });
   await pollTestClockUntilReady(clock.id);
 
-  // A one-hour buffer past the real period end, matching this
-  // investigation's own live-verified exploration.
-  const targetTime = currentPeriodEnd + 3_600;
+  const targetTime = currentPeriodEnd + 3_600; // one-hour buffer past the real period end
   await stripeRequest('POST', `/test_helpers/test_clocks/${clock.id}/advance`, {
     frozen_time: String(targetTime),
   });
   await pollTestClockUntilReady(clock.id, 180_000);
 }
 
-// --- MongoDB read-only helpers ---
-//
-// HARD RULE, no exceptions: this connection is a credential shared with
-// real people outside this project, approved for READ-ONLY use on this
-// investigation specifically (see CLAUDE.md). Every function in this
-// section must never call anything but find()/findOne(). Never add an
-// insert/update/delete call here or anywhere else in this file.
+// --- MongoDB read-only helpers --- HARD RULE (see CLAUDE.md): shared credential, only find()/findOne(), never write.
 async function getTierForStripeCustomer(customerId: string): Promise<string | null> {
   const client = new MongoClient(MONGO_URI);
   try {
@@ -148,14 +110,7 @@ async function getTierForStripeCustomer(customerId: string): Promise<string | nu
   }
 }
 
-// Added 2026-08-28 to extend this file's own finding 4 with a member: an
-// invited/added member's delegated tier was already confirmed (in
-// account-deletion-billing.spec.ts) to never get elevated to the owner's
-// paid tier, on a still-active Pro account. This file's own real Stripe
-// Test Clock is the natural place to also confirm that stays true - and
-// stays consistent - once the owner's subscription genuinely LAPSES, not
-// just while it's active. See specs/account-deletion-billing-test-plan.md's
-// recommendations section for the original suggestion.
+/** Extends finding 4 (a member's delegated tier never elevates to the owner's paid tier) across a real subscription lapse, not just while active. */
 async function getUserByEmail(email: string) {
   const client = new MongoClient(MONGO_URI);
   try {
@@ -177,10 +132,7 @@ async function getDelegatedMembershipTier(ownerId: string, memberId: string): Pr
   }
 }
 
-// --- App login/navigation and plan-card helpers, duplicated from
-// subscription.spec.ts per this project's established per-file-helper
-// convention (see that file's own identical comment on why these aren't
-// shared via tests/utils/) ---
+// --- App login/navigation and plan-card helpers, duplicated from subscription.spec.ts (see that file's own comment on why these aren't shared) ---
 async function loginAsDisposableAndGoToCompany(page: Page) {
   await page.goto(`${BASE_URL}/login`);
   await page.locator('input[name="username"]').fill(disposableUsername);
@@ -265,38 +217,21 @@ async function cancelSubscriptionAndFinish(page: Page) {
 test.describe('Teams Plan Gating', () => {
   test.describe.configure({ mode: 'serial' });
 
-  // Account does not touch the shared seed account: a fresh disposable
-  // account gets its own fully isolated Company/Payments/Subscription
-  // record, the same account-isolation reasoning established for
-  // Payments/Teams/Subscription (see CLAUDE.md's "Account/company
-  // isolation" section). Register ONE disposable account ONCE here, drive
-  // it through a real purchase + real cancellation + a real Stripe Test
-  // Clock advance past its period end, then run every scenario below
-  // serially against that one now-genuinely-lapsed account.
+  // Registers ONE disposable account here, drives it through a real
+  // purchase + cancellation + Test Clock advance past its period end, then
+  // runs every scenario serially against that one now-lapsed account (see CLAUDE.md's account-isolation pattern).
   test.beforeAll(async ({ browser, browserName }) => {
-    // See subscription.spec.ts's identical guard for why this is needed
-    // on beforeAll itself, not just inside beforeEach below.
+    // Guarded here too, not just beforeEach - a beforeEach skip doesn't gate beforeAll (see CLAUDE.md).
     test.skip(
       browserName !== 'chromium',
       'Disposable single-account state built up sequentially across this file; runs once serially on chromium to avoid cross-project races, redundant registrations, and extra real-email load on the other 2 projects.'
     );
 
-    // This setup does a lot of real, slow work: TWO account registrations
-    // (owner + member) each with their own real verification email, a real
-    // invitation email + accept round trip, a real Stripe Checkout
-    // purchase, a real in-app cancellation, and creating/advancing a real
-    // Stripe test clock (itself live-verified to take real wall-clock time
-    // to process - up to roughly a minute for a full-period advance).
-    // Bumped from the original 960_000 (16min, single-account budget) once
-    // the second account + invite/accept was added 2026-08-28 - generous
-    // headroom for two real email round trips landing back-to-back, not a
-    // tight fit.
+    // Two real registrations/emails, an invitation round trip, a real
+    // Stripe purchase, a real cancellation, and a real Test Clock advance - generous headroom for it all.
     test.setTimeout(1_800_000);
 
-    // browser.newPage() alone drops this project's configured
-    // devices['Desktop Chrome'] context options (notably the user agent),
-    // which live-verified elsewhere in this project can make a real
-    // verification email never arrive within budget - see CLAUDE.md.
+    // newContext() with the device profile, not bare newPage() - see CLAUDE.md's real-email delivery gotcha.
     const context = await browser.newContext({ ...devices['Desktop Chrome'] });
     const page = await context.newPage();
 
@@ -305,9 +240,7 @@ test.describe('Teams Plan Gating', () => {
     disposablePassword = requireEnv('TEST_REGISTER_PASSWORD');
     const registeredAt = new Date();
 
-    // 1. Register + verify + complete profile - standard pattern, no new
-    // findings expected here (see specs/teams-plan-gating-test-plan.md
-    // Suite 1.1 step 1).
+    // 1. Register + verify + complete profile - standard pattern.
     await registerNewAccount(page, emailAlias);
     const verificationLink = await getVerificationLink(emailAlias, registeredAt, 900_000);
     await page.goto(verificationLink);
@@ -319,10 +252,7 @@ test.describe('Teams Plan Gating', () => {
     await completeProfile(page);
     await expect(page).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
 
-    // 2. Purchase Job Link Pro (Monthly) via a real Stripe Checkout round
-    // trip - reusing the exact pattern subscription.spec.ts test 4.2
-    // already proved reliable, including its two live-verified fixes
-    // (accessible-name-based field selectors, no premature .count() check).
+    // 2. Purchase Job Link Pro (Monthly) via real Stripe Checkout (same pattern as subscription.spec.ts test 4.2).
     await page.goto(`${BASE_URL}/subscription`);
     await selectPlanAndContinue(page, 'Job Link Pro');
     await expect(page.getByRole('heading', { name: 'Review Purchase', exact: true })).toBeVisible();
@@ -347,15 +277,9 @@ test.describe('Teams Plan Gating', () => {
     await payButton.click();
     await expect(page).toHaveURL(/\/subscription\?success=true/, { timeout: 45_000 });
 
-    // 2b. While the owner is still genuinely Pro/active (before any
-    // cancellation), register a second disposable MEMBER account, invite
-    // them into the owner's company, and accept - reusing the exact
-    // invite/accept pattern already proven in teams.spec.ts test 6.7 /
-    // account-deletion-billing.spec.ts. Capture the member's delegated
-    // tier NOW, while the owner is unambiguously paid/active, as the
-    // "before" half of extending finding 4 across a real lapse (see
-    // specs/account-deletion-billing-test-plan.md's recommendations
-    // section for the original suggestion).
+    // 2b. While the owner is still genuinely Pro/active, register a second
+    // MEMBER account, invite and accept, then capture the member's
+    // delegated tier now - the "before" half of extending finding 4 across a real lapse.
     const memberSetupContext = await browser.newContext({ ...devices['Desktop Chrome'] });
     const memberSetupPage = await memberSetupContext.newPage();
     const memberEmailAlias = generateUniqueEmailAlias();
@@ -384,28 +308,19 @@ test.describe('Teams Plan Gating', () => {
     memberMongoId = String(memberUserDoc._id);
     memberTierWhileOwnerActive = await getDelegatedMembershipTier(ownerMongoId, memberMongoId);
 
-    // 3. Schedule a REAL cancellation via the app's own Cancel
-    // Subscription -> Finish Cancellation flow (matches
-    // subscription.spec.ts Suite 7's already-proven behavior exactly).
+    // 3. Schedule a REAL cancellation via Cancel Subscription -> Finish Cancellation.
     await page.goto(`${BASE_URL}/subscription`);
     await cancelSubscriptionAndFinish(page);
 
     await context.close();
 
-    // 4. Find this account's real Stripe customer + subscription, then
-    // drive a real Stripe Test Clock past the period end so the
-    // already-scheduled cancellation actually takes effect - live-
-    // verified via this exact sequence during this plan's own
-    // exploration (see specs/teams-plan-gating-test-plan.md Suite 1.1).
+    // 4. Find the real Stripe customer/subscription, then advance a real Test Clock past the period end.
     stripeCustomerId = await stripeFindCustomerByEmail(emailAlias);
     const { id: subId, currentPeriodEnd } = await stripeFindActiveSubscription(stripeCustomerId);
     stripeSubscriptionId = subId;
     await attachClockAndAdvancePastPeriodEnd(stripeCustomerId, currentPeriodEnd);
 
-    // 5. Ground-truth confirmation the lapse is real, independent of
-    // anything the UI will show next - this test's own equivalent of
-    // subscription.spec.ts's "don't trust the toast" gotcha family:
-    // verify against the real backend state, not an assumption.
+    // 5. Ground-truth confirmation the lapse is real against the backend, not an assumption from the UI.
     const finalSub = await stripeRequest('GET', `/subscriptions/${stripeSubscriptionId}`);
     if (finalSub.status !== 'canceled') {
       throw new Error(
@@ -432,9 +347,7 @@ test.describe('Teams Plan Gating', () => {
       await expect(createTeamButton).toBeEnabled();
       await expect(inviteMemberButton).toBeEnabled();
 
-      // 2. Actually complete the flow - not just checking the button's
-      // disabled state, but that the server genuinely allows the action.
-      // Live-verified 2026-08-27: this succeeds with zero restriction.
+      // 2. Complete the flow for real - the server genuinely allows it, with zero restriction.
       await createTeamButton.click();
       await expect(page.getByRole('heading', { name: 'Create Team', exact: true })).toBeVisible();
       const teamName = `QA Plan Gating ${Date.now()}`;
@@ -443,12 +356,9 @@ test.describe('Teams Plan Gating', () => {
       await expect(createButton).toBeEnabled();
       await createButton.click();
 
+      // The dialog shows a confirmation sub-state first (still 'Create
+      // Team', with a 'Continue' button) before the new team's card appears.
       await expect(page).toHaveURL(/\/teams\/list/, { timeout: 15_000 });
-      // Live-verified 2026-08-27 (this exact automated run): the dialog
-      // doesn't close straight to the team list - it shows a confirmation
-      // sub-state first (still titled 'Create Team', with the success
-      // message and a 'Continue' button) that must be dismissed before the
-      // new team's card becomes visible.
       await expect(page.getByText('Your team was created successfully!', { exact: true })).toBeVisible();
       await page.getByRole('button', { name: 'Continue', exact: true }).click();
       await expect(page.getByRole('heading', { name: teamName, exact: true })).toBeVisible();
@@ -495,12 +405,8 @@ test.describe('Teams Plan Gating', () => {
 
   test.describe('MongoDB Consistency Check', () => {
     test("4.1 The user's stored plan tier in MongoDB (tier_subscription_view) matches what the UI and Stripe both show once genuinely lapsed @real-email", async () => {
-      // See specs/teams-plan-gating-test-plan.md Suite 4 for the full,
-      // live-verified schema mapping (users.stripe_id -> users._id ->
-      // tier_subscription_view.user_id -> tier). Distinct tier values seen
-      // across this database: free, pro, invoice, invoicing - assert NOT
-      // a paid tier rather than assuming 'free' is the only possible
-      // non-paid value, per that same section's own reasoning.
+      // Schema: users.stripe_id -> users._id -> tier_subscription_view.user_id
+      // -> tier (see CLAUDE.md). Asserts NOT a paid tier rather than assuming 'free' is the only non-paid value.
       const tier = await getTierForStripeCustomer(stripeCustomerId);
       expect(tier).not.toBeNull();
       expect(['pro', 'invoice', 'invoicing']).not.toContain(tier);
@@ -509,22 +415,13 @@ test.describe('Teams Plan Gating', () => {
 
   test.describe("A Member's Delegated Tier Across a Real Subscription Lapse", () => {
     test("5.1 While the owner was still genuinely Pro/active, the invited member's own delegated tier was never elevated @real-email", async () => {
-      // Extends account-deletion-billing.spec.ts's own finding (inviting or
-      // adding a member to a paid account never elevates that member's
-      // delegated tier) with this file's own genuinely-lapsed account -
-      // this is the "before" half, captured in beforeAll while the owner
-      // was unambiguously paid/active, before any cancellation.
+      // The "before" half, captured in beforeAll while the owner was still unambiguously paid/active.
       expect(memberTierWhileOwnerActive).not.toBeNull();
       expect(['pro', 'invoice', 'invoicing']).not.toContain(memberTierWhileOwnerActive);
     });
 
     test("5.2 After the owner's subscription genuinely LAPSED, the member's delegated tier is exactly unchanged from before the lapse @real-email", async () => {
-      // The "after" half: re-query the same delegated membership row, now
-      // that the owner has genuinely lapsed to Free (confirmed in
-      // beforeAll's own step 5, and independently re-confirmed by test 4.1
-      // above for the owner). Confirms the member's tier was neither
-      // incorrectly granted while the owner was paid (5.1) NOR left
-      // incorrectly elevated/corrupted by the lapse transition itself.
+      // The "after" half: confirms the member's tier was neither granted while the owner was paid (5.1) nor corrupted by the lapse itself.
       const memberTierAfterLapse = await getDelegatedMembershipTier(ownerMongoId, memberMongoId);
       expect(memberTierAfterLapse).toBe(memberTierWhileOwnerActive);
       expect(['pro', 'invoice', 'invoicing']).not.toContain(memberTierAfterLapse);

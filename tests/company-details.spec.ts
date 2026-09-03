@@ -8,10 +8,7 @@ const BASE_URL = requireEnv('BASE_URL');
 const SEED_USERNAME = requireEnv('TEST_USERNAME');
 const SEED_PASSWORD = requireEnv('TEST_LOGIN_PASSWORD');
 
-// Logs in as the shared seed account and lands on /company - the first tab
-// shown immediately after login, and the page hosting the Company Details
-// card this file covers. Mirrors loginAsSeedAndGoToCompany() in
-// tests/logo-upload.spec.ts.
+/** Logs in as the shared seed account and lands on /company. */
 async function loginAsSeedAndGoToCompany(page: Page) {
   await page.goto(`${BASE_URL}/login`);
   await page.locator('input[name="username"]').fill(SEED_USERNAME);
@@ -22,35 +19,17 @@ async function loginAsSeedAndGoToCompany(page: Page) {
   await expect(page.getByRole('link', { name: 'Edit' })).toBeVisible();
 }
 
-// The "Company Details" heading text appears TWICE in the DOM on the
-// read-only /company view: once as a hidden (0x0 bounding box, matching the
-// same aria-expanded mobile-layout accordion pattern already documented on
-// logoUploadCard() in tests/logo-upload.spec.ts) duplicate heading OUTSIDE
-// any .MuiCard-root, and once as the real, visible desktop CardHeader title
-// INSIDE the card - live-verified via direct DOM inspection. Scoping every
-// locator below to this specific card (identified by containing the 'Edit'
-// link, which is live-verified to be unique on the page) avoids strict-mode
-// ambiguity against that hidden duplicate, mirroring logoUploadCard()'s
-// approach exactly.
+/** Scopes to the real Company Details card, not its hidden duplicate heading. */
 function companyDetailsCard(page: Page) {
   return page.locator('.MuiCard-root').filter({ has: page.getByRole('link', { name: 'Edit' }) });
 }
 
-// Scopes a locator to the edit form's MuiFormControl-root wrapper for a
-// given field label - used for the Office/Mobile Phone Number widgets,
-// whose own country-flag <combobox> has no accessible name of its own but
-// is live-verified to be the ONLY [role="combobox"] element nested inside
-// the same MuiFormControl-root as that field's text label.
+/** Scopes to a phone field's wrapper - its country-flag combobox has no accessible name of its own. */
 function phoneFieldContainer(page: Page, label: string) {
   return page.locator('.MuiFormControl-root').filter({ hasText: label });
 }
 
-// Clears a text field's current value one character at a time via real
-// Backspace keystrokes (not a raw fill('') value-replace). Live-verified
-// during automation of this section: fill('') and real keystrokes CAN
-// behave differently for validation timing on this app (see the plan's
-// corrected section 3.2, re-verified via both techniques) - real keystrokes
-// are used here whenever a test's whole point is validation-triggering.
+/** Clears a field via real Backspace keystrokes, not fill('') (see CLAUDE.md's validation-timing gotcha). */
 async function clearFieldWithBackspace(page: Page, field: Locator) {
   await field.click();
   await page.keyboard.press('End');
@@ -60,13 +39,7 @@ async function clearFieldWithBackspace(page: Page, field: Locator) {
   }
 }
 
-// Clicks 'Save' on the edit form, waits for the real 'POST /company?edit=true'
-// response (per this project's documented "don't trust the toast" gotcha -
-// this save flow has no toast at all, see test 4.1, so the real network
-// response is the ONLY reliable success signal), asserts it returned 200,
-// then waits for the genuine post-save navigation back to '/company' (the
-// URL losing its '?edit=true' query param). Shared by every test in section
-// 4 that performs a real, valid save.
+/** Clicks 'Save', waits for the real 200 response, then the redirect - this flow has no success toast (see test 4.1). */
 async function saveCompanyDetailsAndWaitForNavigation(page: Page) {
   const saveResponsePromise = page.waitForResponse(
     (response) => response.url().includes('/company?edit=true') && response.request().method() === 'POST'
@@ -77,21 +50,11 @@ async function saveCompanyDetailsAndWaitForNavigation(page: Page) {
   await expect(page).toHaveURL(`${BASE_URL}/company`);
 }
 
-// Every test below reads (and, in later sections of this file, writes) the
-// ONE shared seed account (pfautomation) that the rest of this suite also
-// depends on for login. Same trade-off already documented and applied in
-// tests/profile-settings.spec.ts and tests/logo-upload.spec.ts: serial +
-// chromium-only avoids racing parallel browser projects/workers on this
-// single account's Company Details state.
+// Reads/writes the shared seed account - serial + chromium-only avoids
+// racing parallel browser projects on its Company Details state (see CLAUDE.md).
 test.describe('Company Details', () => {
-  // retries: 2 - test 2.4 depends on the real (unmocked) Google Places API,
-  // which has been observed to occasionally not respond with any
-  // suggestions within the timeout (genuine external flakiness, not a bug -
-  // see its own comment). In `mode: 'serial'`, one test failing skips every
-  // remaining test in the describe as "did not run" - without retries, one
-  // slow Places API response blocks all 19 tests, not just that one. 2.4
-  // never saves/mutates persisted data (only reloads to discard), so
-  // retrying it is safe and doesn't affect the tests around it.
+  // retries: 2 - test 2.4's real Google Places API can be slow; a serial
+  // describe would otherwise skip every remaining test on one bad response (see CLAUDE.md).
   test.describe.configure({ mode: 'serial', retries: 2 });
 
   test.beforeEach(async ({ page, browserName }) => {
@@ -101,19 +64,14 @@ test.describe('Company Details', () => {
 
   test.describe('Company Details — Read-Only Default View', () => {
     test("1.1 Fresh/unconfigured company shows '-' for all five fields, plus a working Edit link", async ({ page }) => {
-      // 1. Log in with the seed account (pfautomation / 123456Pp!) and land
-      // on /company (the default first tab after login, done by
-      // beforeEach), before making any edits.
+      // 1. Land on /company before making any edits (done by beforeEach).
       await expect(page).toHaveTitle('Company | Job Link');
 
       const card = companyDetailsCard(page);
 
-      // A 'Company Details' card is the first card on the page, positioned
-      // before 'Logo Upload'. Checked via DOM order (not bounding-box Y
-      // coordinate) since the page live-verified to lay these cards out in
-      // a responsive grid - Company Details and Logo Upload can render
-      // side-by-side at the SAME y-coordinate depending on viewport width,
-      // which made an earlier y-position assertion here flaky/wrong.
+      // 'Company Details' is the first card, before 'Logo Upload' - checked
+      // via DOM order, not Y-coordinate, since cards can render side-by-side
+      // at the same Y in this responsive grid.
       await expect(card.getByText('Company Details', { exact: true })).toBeVisible();
       const allCards = page.locator('.MuiCard-root');
       const cardTitles = await allCards.locator('.MuiCardHeader-title, [class*="CardHeader-title"]').allTextContents();
@@ -123,28 +81,8 @@ test.describe('Company Details', () => {
       expect(logoUploadIndex).toBeGreaterThanOrEqual(0);
       expect(companyDetailsIndex).toBeLessThan(logoUploadIndex);
 
-      // NOTE: per the plan's own Application Overview caveat, the seed
-      // account's Company Details card was left, at the end of the
-      // exploration session that produced this plan, in a permanently
-      // populated state (Company Name "QA Automation Test Co", Location,
-      // Email, Phone Number, and Contractor License all holding real QA
-      // test values) because required fields can never be cleared back to
-      // empty through the UI (an expected consequence of required-field
-      // validation, not a bug - see the plan's corrected section 3.2). So
-      // this account is NOT reliably in the pristine "-" placeholder state
-      // at test time (confirmed live: all five fields currently show real
-      // saved values, not "-") - the exact same situation already handled
-      // in tests/logo-upload.spec.ts's test 1.1. The plan's "'Company Name'
-      // shows exactly '-'" (etc.) assertions are therefore intentionally
-      // NOT asserted here - they would be false/unreliable checks against
-      // this shared account's actual current state. Only the state that
-      // holds true regardless of the fields' current values - card/field
-      // structure, the Edit link's presence and destination - is asserted
-      // below.
-
-      // 'Company Name', 'Location', 'Email', 'Phone Number', and
-      // 'Contractor License' labels are all visible, each with an
-      // associated value heading.
+      // ADAPTED: required fields can never revert to '-' through the UI (see
+      // CLAUDE.md), so this asserts structure/labels only, not the plan's "shows '-'" checks.
       await expect(card.getByText('Company Name', { exact: true })).toBeVisible();
       await expect(card.getByText('Location', { exact: true })).toBeVisible();
       await expect(card.getByText('Email', { exact: true })).toBeVisible();
@@ -152,8 +90,7 @@ test.describe('Company Details', () => {
       await expect(card.getByText('Contractor License', { exact: true })).toBeVisible();
       await expect(card.getByRole('heading', { level: 6 })).toHaveCount(5);
 
-      // A single 'Edit' link is visible and enabled below the fields, with
-      // no other action buttons present on this card.
+      // A single 'Edit' link is visible/enabled, no other action buttons on this card.
       const editLink = card.getByRole('link', { name: 'Edit' });
       await expect(editLink).toBeVisible();
       await expect(editLink).toBeEnabled();
@@ -165,24 +102,14 @@ test.describe('Company Details', () => {
     });
 
     test('1.2 Clicking Edit performs a real URL navigation to /company?edit=true, not an inline state toggle', async ({ page }) => {
-      // 1. On /company, click the 'Edit' link.
+      // 1. Click the 'Edit' link - the URL genuinely changes to
+      // /company?edit=true, not just an in-place DOM swap.
       await companyDetailsCard(page).getByRole('link', { name: 'Edit' }).click();
-
-      // Live-verified: the browser's URL actually changes to
-      // '/company?edit=true' (confirmed via page.url()), not just an
-      // in-place DOM swap with the URL staying at '/company' - this is a
-      // genuine navigation.
       await expect(page).toHaveURL(`${BASE_URL}/company?edit=true`);
 
-      // 2. Separately, starting from a fresh session, navigate directly to
-      // https://joblink-portal.prestg.fieldpiece.com/company?edit=true via
-      // page.goto() without ever clicking the 'Edit' link.
+      // 2. Navigate directly to /company?edit=true from a fresh session -
+      // renders the same form, confirming this is a real, deep-linkable route.
       await page.goto(`${BASE_URL}/company?edit=true`);
-
-      // Live-verified: this renders the exact same edit form as clicking
-      // 'Edit' would - confirming this is a real, deep-linkable,
-      // bookmarkable route, not something gated behind an in-app click
-      // handler only.
       await expect(page.getByRole('textbox', { name: 'Company Name' })).toBeVisible();
       await expect(page.getByRole('textbox', { name: 'Contractor License' })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Cancel' })).toBeVisible();
@@ -205,9 +132,7 @@ test.describe('Company Details', () => {
       await expect(page.getByText('Address *', { exact: true })).toBeVisible();
       await expect(page.getByRole('textbox', { name: 'Address 2' })).toBeVisible();
       await expect(page.getByText('Address 2 *', { exact: true })).toBeVisible();
-      // Exact name (not /State/) - a regex would also match the Country
-      // combobox's accessible name "Country United States" (contains
-      // "States"), live-verified to cause a strict-mode ambiguity.
+      // Exact name, not /State/ - a regex would also match Country's accessible name ("...United States").
       await expect(page.getByRole('combobox', { name: 'State Select' })).toBeVisible();
       await expect(page.getByText('State *', { exact: true })).toBeVisible();
       await expect(page.getByRole('textbox', { name: 'City' })).toBeVisible();
@@ -217,8 +142,7 @@ test.describe('Company Details', () => {
       await expect(page.getByRole('textbox', { name: 'Email' })).toBeVisible();
       await expect(page.getByText('Email *', { exact: true })).toBeVisible();
       await expect(page.getByRole('textbox', { name: 'Office Phone Number' })).toBeVisible();
-      // Office Phone Number is NOT required - no '*' suffix on its label,
-      // unlike every field above.
+      // Office Phone Number is NOT required (no '*'), unlike every field above.
       await expect(page.getByText('Office Phone Number *', { exact: true })).toHaveCount(0);
       await expect(page.getByRole('textbox', { name: 'Mobile Phone Number' })).toBeVisible();
       await expect(page.getByText('Mobile Phone Number *', { exact: true })).toBeVisible();
@@ -227,83 +151,38 @@ test.describe('Company Details', () => {
       await expect(page.getByRole('textbox', { name: 'Terms and Conditions' })).toBeVisible();
       await expect(page.getByText('Terms and Conditions *', { exact: true })).toHaveCount(0);
 
-      // 'Cancel' and 'Save' buttons are shown at the bottom; 'Save' is
-      // disabled by default on a fresh/unconfigured company.
       await expect(page.getByRole('button', { name: 'Cancel' })).toBeVisible();
       const saveButton = page.getByRole('button', { name: 'Save' });
       await expect(saveButton).toBeVisible();
 
-      // ADAPTATION NOTE: the plan's "'Save' is disabled by default on a
-      // fresh/unconfigured company" was live-verified against a totally
-      // blank company. This shared seed account's company record now holds
-      // real saved values in every field (see test 1.1's note), so that
-      // exact fresh-blank-form precondition can't be reproduced here. What
-      // IS still live-verified and stable on this account: 'Save' is
-      // STILL disabled on every fresh load of this form - not because
-      // required fields are empty, but because of the real 'State'
-      // pre-fill/hydration bug documented in the plan's section 4.5 (the
-      // 'State' dropdown never re-hydrates to its last-saved value on
-      // load, so the form always treats State as invalid/empty). This is
-      // asserted here as "Save starts disabled", matching the spirit of
-      // the plan's assertion, while the underlying cause differs from a
-      // truly fresh company.
+      // ADAPTED: disabled here not from empty fields, but the 'State' pre-fill bug (test 4.5) - it never re-hydrates on load.
       await expect(saveButton).toBeDisabled();
       await expect(page.getByRole('combobox', { name: 'State Select' })).toHaveText('Select');
 
-      // 2. Compare this list against the read-only card's fields
-      // documented in section 1.1.
-      // Live-verified, notable finding: Country, Address 2, Office Phone
-      // Number, Company Website, and Terms and Conditions are all
-      // editable/persisted here but are NEVER shown anywhere on the
-      // read-only card (which only ever shows Company Name, Location,
-      // Email, Phone Number, Contractor License, per test 1.1) - the read
-      // view is a reduced, partial summary of the full data model, not a
-      // 1:1 mirror of the edit form.
+      // 2. Country, Address 2, Office Phone Number, Company Website, and
+      // Terms and Conditions are editable here but never shown on the read-only card (test 1.1).
     });
 
     test('2.2 Country dropdown displays the last-saved value on reload (adapted)', async ({ page }) => {
-      // ADAPTATION NOTE: the plan's original scenario asserted that Country
-      // defaults to a client-side IP-geolocation guess on a totally
-      // fresh/unconfigured company (Ecuador, in the original exploration
-      // session). That precondition is no longer reproducible against this
-      // shared seed account - live-verified, its company record now has a
-      // genuinely SAVED Country value ('United States'). Adapted instead to
-      // verify a still-meaningful, currently-true behavior: Country
-      // reflects the last-SAVED value on every fresh load of the edit form,
-      // and reverts to it if changed-but-not-saved, rather than resetting
-      // to some other default.
-      // 1. On /company?edit=true, inspect the 'Country' dropdown's current
-      // value.
+      // ADAPTED: this account now has a real saved Country ('United
+      // States'), so tests the still-true behavior: reflects the last-saved value on reload, not a re-rolled default.
       await page.goto(`${BASE_URL}/company?edit=true`);
       const countryCombobox = page.getByRole('combobox', { name: /Country/ });
       await expect(countryCombobox).toHaveText('United States');
 
-      // Change Country to a different value without saving.
+      // 1. Change Country without saving.
       await countryCombobox.click();
       await page.getByRole('option', { name: 'Canada', exact: true }).click();
       await expect(countryCombobox).toHaveText('Canada');
 
-      // Reload the page (do not Save) to discard the unsaved change.
+      // 2. Reload (do not Save) - reverts to the last-saved 'United States', confirming it's persisted backend state.
       await page.goto(`${BASE_URL}/company?edit=true`);
-
-      // expect: Country reverts to the last-saved value 'United States' on
-      // this fresh load, confirming it reflects genuinely persisted backend
-      // state on reload, not a re-rolled client-side geolocation guess.
       await expect(page.getByRole('combobox', { name: /Country/ })).toHaveText('United States');
     });
 
     test('2.3 Terms and Conditions textarea is pre-filled with the generic legal boilerplate default', async ({ page }) => {
-      // ADAPTATION NOTE: the plan documented this text as a fresh-company
-      // default that appears even on an otherwise completely blank
-      // company. Live-verified against this shared seed account's now
-      // non-fresh company record: this exact boilerplate text is STILL
-      // present, because nothing in this suite has ever overwritten the
-      // Terms and Conditions field with a different value - so the
-      // underlying assertion (this exact text is present in the textarea)
-      // remains true and is tested as-is, without needing to fabricate a
-      // fresh-company precondition.
-      // 1. On /company?edit=true, inspect the 'Terms and Conditions'
-      // textarea's content.
+      // 1. This boilerplate is a fresh-company default, but still holds
+      // true here since nothing in this suite has ever overwritten it.
       await page.goto(`${BASE_URL}/company?edit=true`);
 
       await expect(page.getByRole('textbox', { name: 'Terms and Conditions' })).toHaveValue(
@@ -320,20 +199,8 @@ test.describe('Company Details', () => {
       await page.getByRole('button', { name: 'Clear' }).click();
       await addressCombobox.pressSequentially('1725 W North Broadway Anaheim');
 
-      // expect: a real listbox of matching addresses appears - a genuine
-      // third-party-backed autocomplete, not a static/mocked list. Live
-      // re-verification found the exact suggestion set/order for this query
-      // is NOT perfectly stable run-to-run (a real, unmocked Google Places
-      // API) - e.g. one run's suggestions included "...Santa Maria, CA...",
-      // another's did not. Selecting the FIRST suggestion (rather than
-      // matching one exact address string) consistently resolved to the
-      // same Santa Barbara County, CA, 93458 result across multiple live
-      // re-runs, so that's what this test relies on instead of an exact
-      // suggestion-text match.
-      // Real external API call (Google Places), not always fast - a longer
-      // timeout here avoids flaking on a slow-but-not-broken response,
-      // same tolerance this project already gives other real external
-      // dependencies (e.g. real-email polling in tests/utils/email.ts).
+      // A real listbox appears (unmocked Google Places, unstable suggestion
+      // order) - always selects the FIRST one, which reliably resolves to Santa Barbara County, CA, 93458.
       const suggestionsList = page.getByRole('listbox', { name: 'Address' });
       await expect(suggestionsList).toBeVisible({ timeout: 15_000 });
       const suggestion = page.getByRole('option').first();
@@ -342,38 +209,19 @@ test.describe('Company Details', () => {
       // 2. Click the first suggested option.
       await suggestion.click();
 
-      // expect: the 'Address' field collapses to just the street portion.
-      // toHaveValue(), not toHaveText() - this combobox is a plain <input>,
-      // its content is a `value` attribute, not text content.
+      // Address collapses to the street portion (toHaveValue, not
+      // toHaveText - this combobox is a plain <input>), Zip auto-populates.
       await expect(addressCombobox).toHaveValue('1725 North Broadway');
-      // expect: 'Zip Code' auto-populates to '93458'.
       await expect(page.getByRole('textbox', { name: 'Zip Code' })).toHaveValue('93458');
-      // Live-verified, notable finding/real defect: 'City' auto-populates
-      // to 'Santa Barbara County' - a COUNTY name, not the actual city
-      // 'Santa Maria' shown in the suggestion text itself - indicating a
-      // real data-mapping bug in how the app extracts a 'city' from the
-      // Places API's address components for at least this address.
+      // REAL BUG: City auto-populates to 'Santa Barbara County' - a COUNTY
+      // name, not the actual city 'Santa Maria' from the suggestion text.
       await expect(page.getByRole('textbox', { name: 'City' })).toHaveValue('Santa Barbara County');
 
-      // CORRECTION to the live-verified plan, found while automating this
-      // exact scenario: the plan claims 'State' also auto-populates (to
-      // 'California') as part of this same address selection. Reproduced
-      // via this exact automated flow 3 separate times, with waits up to
-      // 30s: State never updates away from its 'Select' placeholder here,
-      // even though City/Zip do, reliably and quickly. A one-off manual
-      // exploration script did once observe State updating correctly after
-      // ~3s using a near-identical interaction sequence, so this may be a
-      // genuine intermittent behavior rather than a hard 100%-of-the-time
-      // failure - but it was NOT reproducible via Playwright automation
-      // across repeated attempts, so this test asserts the state that
-      // reliably reproduces (State stays unfilled) rather than the
-      // occasionally-observed one, and flags this as worth a developer
-      // double-check rather than a confirmed one-way-or-the-other bug.
+      // State does NOT auto-populate (stays 'Select') despite City/Zip
+      // updating - reproduced 3x, possibly intermittent, flagged for a dev check.
       await expect(page.getByRole('combobox', { name: 'State Select' })).toHaveText('Select');
 
-      // Cleanup: do NOT click 'Save' - reload instead, so this test does
-      // not mutate the shared account's persisted Company Details data
-      // (real saves are only covered by section 4's dedicated tests).
+      // Cleanup: reload instead of Save, so this test never mutates the shared account's persisted data.
       await page.goto(`${BASE_URL}/company?edit=true`);
     });
 
@@ -385,17 +233,8 @@ test.describe('Company Details', () => {
       const officePhoneNumber = page.getByRole('textbox', { name: 'Office Phone Number' });
       const mobilePhoneNumber = page.getByRole('textbox', { name: 'Mobile Phone Number' });
 
-      // Portability: Office Phone Number is NOT a required field and was
-      // never actually saved during this project's exploration - its
-      // displayed default is a client-side guess (the same kind of
-      // session-specific IP-geolocation default already documented for the
-      // main Country dropdown in test 2.2), not a persisted backend value.
-      // Asserting a hardcoded expected value here would be exactly the
-      // hardcoded-seed-account-state problem already fixed project-wide in
-      // tests/profile-settings.spec.ts's discoverSeedBaseline() - so this
-      // test discovers both fields' current values instead of assuming
-      // them, then asserts they stay unchanged (a relative check, not an
-      // absolute one).
+      // Discovers current values rather than hardcoding them (see CLAUDE.md's
+      // Portability section) - Office Phone Number was never actually saved, so its default is a client-side guess.
       const originalOfficePhone = await officePhoneNumber.inputValue();
       const originalMobilePhone = await mobilePhoneNumber.inputValue();
 
@@ -406,10 +245,7 @@ test.describe('Company Details', () => {
       await page.getByRole('option', { name: 'Canada', exact: true }).click();
       await expect(countryCombobox).toHaveText('Canada');
 
-      // expect: both the 'Office Phone Number' and 'Mobile Phone Number'
-      // widgets' own country-flag selectors remain completely unaffected -
-      // changing the company's mailing-address Country does NOT cascade to
-      // either phone widget's own separately-tracked country selection.
+      // Both phone widgets remain unaffected - Country doesn't cascade to either's own country selection.
       await expect(officePhoneNumber).toHaveValue(originalOfficePhone);
       await expect(mobilePhoneNumber).toHaveValue(originalMobilePhone);
 
@@ -418,104 +254,60 @@ test.describe('Company Details', () => {
       await mobilePhoneFlag.click();
       await page.getByRole('option', { name: 'United Kingdom' }).click();
 
-      // expect: only the Mobile Phone Number field resets to the bare dial
-      // code; the Office Phone Number field's selector and value are
-      // unaffected - confirming these are two fully independent
-      // phone-widget instances.
+      // Only Mobile Phone resets to the bare dial code - Office Phone is
+      // unaffected, confirming these are two fully independent widgets.
       await expect(mobilePhoneNumber).toHaveValue('+44 ');
       await expect(officePhoneNumber).toHaveValue(originalOfficePhone);
       await expect(officePhoneFlag).toBeVisible();
 
-      // Cleanup: do NOT click 'Save' - reload instead to discard all
-      // unsaved changes made in this test (Country, Mobile Phone country
-      // selector) so the next test starts from the account's real
-      // last-saved state.
+      // Cleanup: reload instead of Save, to discard this test's unsaved changes.
       await page.goto(`${BASE_URL}/company?edit=true`);
     });
   });
 
   test.describe('Company Details — Validation', () => {
     test("3.1 Blurring a pristine empty required field shows 'The field is required' and keeps Save disabled (adapted)", async ({ page }) => {
-      // ADAPTATION NOTE: the plan's original scenario asserts this on a
-      // fresh /company?edit=true load where Company Name is genuinely
-      // pristine-empty since page load. Live-verified on this shared seed
-      // account: every one of the 13 edit-form fields already holds a real
-      // saved value at every fresh load (Company Name currently "QA
-      // Automation Test Co") - there is no field that is genuinely
-      // "pristine empty since page load" available to test on this account.
-      // Adapted, like the corrected 3.2, to clear Company Name via real
-      // keystrokes to exercise the same 'required' validation path - this
-      // necessarily ends up testing near-identical mechanics to 3.2 given
-      // the account's current state, which is expected here, not a mistake.
-      // 1. On a fresh /company?edit=true load, click into the (adapted:
-      // cleared via real keystrokes) 'Company Name' field, then blur it
-      // (click into 'Contractor License').
+      // ADAPTED: no field here is genuinely pristine-empty at load, so this
+      // clears Company Name via keystrokes instead - near-identical to 3.2, which is expected.
+      // 1. Clear Company Name, then blur it (click into Contractor License).
       await page.goto(`${BASE_URL}/company?edit=true`);
       const companyName = page.getByRole('textbox', { name: 'Company Name' });
       const contractorLicense = page.getByRole('textbox', { name: 'Contractor License' });
       await clearFieldWithBackspace(page, companyName);
       await contractorLicense.click();
 
-      // expect: a red inline message with the exact text 'The field is
-      // required' appears beneath Company Name, and the field is marked
-      // invalid - identical wording/pattern to the same validation already
-      // documented elsewhere in this suite (login, register, Profile
-      // Settings).
       await expect(page.getByText('The field is required', { exact: true })).toBeVisible();
       await expect(companyName).toHaveAttribute('aria-invalid', 'true');
-
-      // expect: the 'Save' button stays disabled.
       await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
 
-      // Cleanup: reload (do not Save) so Company Name is never actually
-      // persisted as empty (per the plan, this is impossible anyway - Save
-      // stays disabled) and the next test starts from the real saved value.
+      // Cleanup: reload without saving (Save is disabled anyway, so nothing could have persisted).
       await page.goto(`${BASE_URL}/company?edit=true`);
       await expect(companyName).toHaveValue('QA Automation Test Co');
     });
 
     test("3.2 Clearing a previously-filled required field correctly re-triggers 'required' validation and blocks Save", async ({ page }) => {
-      // CORRECTION (2026-08-17, per the plan): the original live exploration
-      // that produced this plan claimed clearing a previously-filled
-      // required field silently suppressed the 'required' message and left
-      // Save looking enabled with zero feedback. Independent re-verification
-      // found this does NOT reproduce: the 'required' message appears
-      // correctly and Save is correctly disabled, identical to the
-      // pristine-empty-field case in 3.1. This test exercises the real
-      // (corrected) behavior.
+      // CORRECTED: the original plan claimed this silently suppressed the
+      // 'required' message - re-verification found it does NOT reproduce;
+      // the message appears and Save disables correctly, same as 3.1.
       await page.goto(`${BASE_URL}/company?edit=true`);
       const companyName = page.getByRole('textbox', { name: 'Company Name' });
       const contractorLicense = page.getByRole('textbox', { name: 'Contractor License' });
 
-      // 1. Fill 'Company Name' with a valid value (e.g. 'QA Automation Test
-      // Co'), then clear it completely back to empty via real keystrokes
-      // (Backspace, not a raw value-replace), then blur it by clicking into
-      // another field.
+      // 1. Fill 'Company Name', then clear it via real keystrokes, then blur it.
       await companyName.click();
       await companyName.fill('QA Automation Test Co');
       await clearFieldWithBackspace(page, companyName);
       await contractorLicense.click();
 
-      // expect: a red inline 'The field is required' message appears
-      // beneath Company Name, and the field is marked invalid - same as the
-      // pristine-empty-field case in section 3.1, no inconsistency.
       await expect(page.getByText('The field is required', { exact: true })).toBeVisible();
       await expect(companyName).toHaveAttribute('aria-invalid', 'true');
 
-      // 2. With all other required fields already valid, attempt to click
-      // 'Save' while Company Name is still empty.
+      // 2. Attempt to click 'Save' while Company Name is still empty.
       const saveButton = page.getByRole('button', { name: 'Save' });
-      // expect: 'Save' is disabled (not just unresponsive) - confirmed via
-      // toBeDisabled(), not just an absence of a network request.
       await expect(saveButton).toBeDisabled();
 
-      // 3. (Cleanup) Reload the page (do not attempt to Save again) to
-      // discard this invalid in-progress edit.
+      // 3. Cleanup: reload - confirms nothing was actually persisted.
       await page.goto(`${BASE_URL}/company?edit=true`);
-
-      // expect: the page reloads with Company Name back to its last
-      // successfully saved value, confirming nothing was actually
-      // persisted.
       await expect(companyName).toHaveValue('QA Automation Test Co');
     });
 
@@ -558,17 +350,8 @@ test.describe('Company Details', () => {
       const contractorLicense = page.getByRole('textbox', { name: 'Contractor License' });
       const saveButton = page.getByRole('button', { name: 'Save' });
 
-      // ADAPTATION NOTE / test setup: this scenario needs "every required
-      // field already valid (so Save is enabled)" as its starting
-      // precondition. Live-verified on this shared account: 'Save' is
-      // otherwise disabled on every fresh form load, not because of Company
-      // Website, but because of the real 'State' pre-fill/hydration bug
-      // already documented in this file's test 2.1 and the plan's section
-      // 4.5 (State never re-hydrates on load, and - confirmed live during
-      // this exact test - does not persist even after being re-selected and
-      // saved). Re-selecting State here is purely test setup to reach the
-      // "every required field valid" precondition this scenario needs; it
-      // is not itself part of what 3.4 is testing.
+      // Setup: re-select State to reach "every required field valid" (Save
+      // is otherwise disabled due to the State pre-fill bug from test 2.1/4.5, not this test's own subject).
       const stateCombobox = page.getByRole('combobox', { name: 'State Select' });
       await stateCombobox.click();
       await page.getByRole('option', { name: 'California', exact: true }).click();
@@ -581,57 +364,30 @@ test.describe('Company Details', () => {
       await website.fill('not a url');
       await contractorLicense.click();
 
-      // expect: NO inline error message of any kind appears for Company
-      // Website, and the 'Save' button remains fully ENABLED - this field
-      // has no client-side format validation whatsoever, unlike Email
-      // (section 3.3).
+      // NO inline error appears and Save stays ENABLED - this field has no client-side format validation at all, unlike Email (3.3).
       await expect(website).not.toHaveAttribute('aria-invalid', 'true');
       await expect(saveButton).toBeEnabled();
 
-      // 2. Click 'Save' with this invalid Company Website value still in
-      // place.
+      // 2. Click 'Save' with this invalid value still in place - a real POST IS sent (unlike 3.2's blocked submission) and returns 200.
       const saveResponsePromise = page.waitForResponse(
         (response) => response.url().includes('/company?edit=true') && response.request().method() === 'POST'
       );
       await saveButton.click();
-
-      // expect: a real 'POST /company?edit=true' request IS sent (unlike
-      // the blocked-submission case in section 3.2) and receives a 200
-      // response.
       const saveResponse = await saveResponsePromise;
       expect(saveResponse.status()).toBe(200);
 
-      // expect: the page does NOT navigate away (stays on
-      // /company?edit=true), the 'Save' button remains enabled (does not
-      // revert to disabled the way a normal successful save does), and NO
-      // toast, inline error, or any other visible feedback of any kind
-      // appears anywhere on the page (confirmed via a page-wide check for
-      // any [role=alert] element and any visible "error" text).
+      // Stays on /company?edit=true, Save stays enabled, and NO toast/error
+      // of any kind appears - not toHaveCount(0), since Next.js's own empty
+      // route-announcer also carries role="alert" (see CLAUDE.md).
       await expect(page).toHaveURL(`${BASE_URL}/company?edit=true`);
       await expect(saveButton).toBeEnabled();
-      // Not toHaveCount(0) - Next.js always injects an empty, visually
-      // hidden `role="alert"` route-announcer element
-      // (`#__next-route-announcer__`) into every page for accessibility,
-      // unrelated to app-level error messages. Asserting it has no text
-      // content is the real "no error message shown" check.
       await expect(page.getByRole('alert')).toHaveText('');
       await expect(page.getByText(/error/i)).toHaveCount(0);
 
-      // 3. Reload the page (full navigation) and re-open /company?edit=true.
+      // 3. Reload - Company Website reverted to its last valid value
+      // ('https://example.com'), proving the invalid save was genuinely
+      // rejected server-side with zero indication given to the user.
       await page.goto(`${BASE_URL}/company?edit=true`);
-
-      // expect: the Company Website field has reverted to its last
-      // successfully-saved valid value (NOT the invalid 'not a url' value)
-      // - proving the invalid save attempt was genuinely rejected by the
-      // backend (not merely a client-side display quirk), even though the
-      // user was given absolutely no indication of this at the time. This
-      // silent-failure pattern is structurally similar to the
-      // already-documented Logo Upload WEBP silent-rejection bug.
-      // No additional cleanup save is needed here: the field already
-      // self-reverted to its last-known-good value 'https://example.com' on
-      // this reload (live-verified), confirming the invalid save attempt
-      // never actually persisted anything server-side - there is nothing
-      // left to restore.
       await expect(page.getByRole('textbox', { name: 'Company Website' })).toHaveValue('https://example.com');
     });
 
@@ -646,20 +402,13 @@ test.describe('Company Details', () => {
       await companyName.fill(longName);
       await contractorLicense.click();
 
-      // expect: the full 251-character value is accepted with no
-      // truncation, and no inline error message of any kind appears on
-      // blur - unlike some other length-capped fields already documented
-      // elsewhere in this suite (e.g. the Username field on registration).
+      // Accepted with no truncation and no inline error, unlike some other length-capped fields elsewhere in this suite.
       await expect(companyName).toHaveValue(longName);
       expect((await companyName.inputValue())).toHaveLength(251);
       await expect(companyName).not.toHaveAttribute('aria-invalid', 'true');
       await expect(page.getByText('The field is required', { exact: true })).toHaveCount(0);
 
-      // Not independently confirmed whether this value would also be
-      // accepted by a real Save + reload round-trip - intentionally NOT
-      // persisted here, per the plan's own documented restraint, to protect
-      // the shared seed account (which has no full restore-to-blank path).
-      // Cleanup: reload without saving.
+      // Cleanup: reload without saving - not persisted, to protect the shared account.
       await page.goto(`${BASE_URL}/company?edit=true`);
       await expect(companyName).toHaveValue('QA Automation Test Co');
     });
@@ -673,44 +422,22 @@ test.describe('Company Details', () => {
       const email = page.getByRole('textbox', { name: 'Email' });
       const stateCombobox = page.getByRole('combobox', { name: 'State Select' });
 
-      // ADAPTATION NOTE / test setup: (a) Address/Address 2/City/Zip/Country
-      // already hold real, valid, previously-persisted values on this
-      // shared account (confirmed live) - the Places Autocomplete flow that
-      // fills these is already dedicated, isolated coverage in test 2.4, so
-      // it is not re-exercised here just to reach a valid-form precondition
-      // (avoids an extra real Google Places API call and its associated
-      // flakiness/slowness for no additional coverage). (b) 'State' must
-      // still be re-selected before every save, per the real pre-fill bug
-      // documented in test 2.1 and directly asserted in test 4.5 below -
-      // this is test setup, not what 4.1 itself is testing.
+      // Setup: Address/City/Zip/Country already hold valid values (2.4 has
+      // its own coverage). State must still be re-selected (the pre-fill bug from 2.1/4.5).
       await stateCombobox.click();
       await page.getByRole('option', { name: 'California', exact: true }).click();
 
-      // 1. Fill every required field with valid values... Click 'Save'.
-      // Live-verified: Company Name, Contractor License, and Email already
-      // hold real baseline values from this file's own earlier tests/prior
-      // exploration ('QA Automation Test Co', 'LIC-123456',
-      // 'qa-company-test@crifa.com'). Per this project's portability
-      // practice of proving genuine persistence rather than asserting a
-      // static hardcoded expectation, this test changes all three to new,
-      // clearly-distinct temporary values, saves, and confirms via reload
-      // that the NEW values genuinely round-tripped through the backend -
-      // then restores the canonical baseline values (also via a real save +
-      // reload check) so the rest of this file's tests, which assume that
-      // baseline, remain valid afterward.
+      // 1. Change Company Name/Contractor License/Email to new temporary
+      // values, save, and confirm via reload they genuinely round-tripped -
+      // then restore the baseline values the rest of this file depends on.
       await companyName.fill('QA Automation Test Co TEMP');
       await contractorLicense.fill('LIC-999999');
       await email.fill('qa-company-test-temp@crifa.com');
 
       await saveCompanyDetailsAndWaitForNavigation(page);
 
-      // expect: unlike Profile Settings, Logo Upload, and Change Password,
-      // this save shows NO success toast of any kind - the only
-      // user-visible confirmation is the silent navigation back to
-      // /company (already asserted above) and the read-only card now
-      // displaying the newly saved values. Not toHaveCount(0) - Next.js
-      // always injects an empty, visually hidden route-announcer
-      // role="alert" element into every page.
+      // Unlike Profile Settings/Logo Upload/Change Password, this save shows
+      // NO success toast - the silent navigation is the only confirmation.
       await expect(page.getByRole('alert')).toHaveText('');
       await expect(page.getByText(/updated successfully|uploaded successfully/i)).toHaveCount(0);
 
@@ -719,22 +446,14 @@ test.describe('Company Details', () => {
       await expect(card.getByRole('heading', { name: 'qa-company-test-temp@crifa.com' })).toBeVisible();
       await expect(card.getByRole('heading', { name: 'LIC-999999' })).toBeVisible();
 
-      // 2. Reload the page (full navigation, not just a soft refresh) and
-      // re-check the read-only card.
+      // 2. Reload (full navigation) - the values genuinely persisted, not just a client-side preview.
       await page.goto(`${BASE_URL}/company`);
-
-      // expect: the temporary values genuinely persisted to the backend,
-      // not just a client-side preview.
       await expect(companyDetailsCard(page).getByRole('heading', { name: 'QA Automation Test Co TEMP' })).toBeVisible();
       await expect(companyDetailsCard(page).getByRole('heading', { name: 'qa-company-test-temp@crifa.com' })).toBeVisible();
       await expect(companyDetailsCard(page).getByRole('heading', { name: 'LIC-999999' })).toBeVisible();
 
-      // Cleanup / second save: restore Company Name, Contractor License,
-      // and Email to the canonical baseline values the rest of this file's
-      // tests depend on. Per this project's "don't trust the toast for a
-      // second save in the same test" gotcha, this restore is confirmed via
-      // the real network response and a real reload, not a toast (which,
-      // per the finding above, never appears for this flow at all anyway).
+      // Cleanup: restore the baseline values, confirmed via the real
+      // response + reload (see CLAUDE.md's second-save-toast gotcha).
       await page.goto(`${BASE_URL}/company?edit=true`);
       await stateCombobox.click();
       await page.getByRole('option', { name: 'California', exact: true }).click();
@@ -750,92 +469,48 @@ test.describe('Company Details', () => {
     });
 
     test("4.2 The read-only card's 'Phone Number' maps specifically to Mobile Phone Number, not Office Phone Number", async ({ page }) => {
-      // 1. Inspect the read-only card's 'Phone Number' field, and compare
-      // it against the edit form's Mobile Phone Number and Office Phone
-      // Number fields' own underlying (exact, unformatted) values.
+      // 1. Compare the card's 'Phone Number' against both phone fields'
+      // underlying values - it's index 3 among test 1.1's 5 headings.
       const card = companyDetailsCard(page);
       await expect(card.getByText('Phone Number', { exact: true })).toBeVisible();
-
-      // The read card exposes exactly 5 value headings (h6), one per
-      // labeled field, in the same DOM order as their labels (see test
-      // 1.1: Company Name, Location, Email, Phone Number, Contractor
-      // License). 'Phone Number' is the 4th labeled field (index 3).
       const headings = card.getByRole('heading', { level: 6 });
       await expect(headings).toHaveCount(5);
       const cardPhoneNumberText = (await headings.nth(3).textContent())?.trim();
 
+      // Discovers current values via the hidden underlying inputs (see CLAUDE.md's discover-don't-hardcode pattern).
       await page.goto(`${BASE_URL}/company?edit=true`);
-      // Discover the current, exact (unformatted, E.164-style) values of
-      // both phone widgets via their hidden underlying inputs, per this
-      // project's discover-don't-hardcode pattern already established for
-      // Office Phone Number in test 2.5.
       const mobilePhoneHidden = page.locator('input[name="mobilePhone.phoneNumber"]');
       const officePhoneHidden = page.locator('input[name="officePhone.phoneNumber"]');
       const mobilePhoneValue = await mobilePhoneHidden.inputValue();
       const officePhoneValue = await officePhoneHidden.inputValue();
 
-      // expect: the read-only card's 'Phone Number' shows exactly the
-      // Mobile Phone Number value.
+      // Card shows exactly Mobile Phone Number, never Office Phone Number (consistent with 2.1's finding).
       expect(cardPhoneNumberText).toBe(mobilePhoneValue);
-      // expect: the Office Phone Number value is not shown anywhere on the
-      // read-only card at all (consistent with section 2.1's finding that
-      // Office Phone Number is excluded from the read view entirely) -
-      // confirmed here by it genuinely differing from what the card shows,
-      // and not appearing anywhere in the card's text. Navigate back to
-      // /company first - `card` is scoped to the read view's 'Edit' link,
-      // which doesn't exist on /company?edit=true.
       expect(cardPhoneNumberText).not.toBe(officePhoneValue);
-      await page.goto(`${BASE_URL}/company`);
-      // Guard against a bare, digit-less country code (e.g. '+1' with no
-      // number entered) - Office Phone Number is optional and can be unset
-      // on the seed account, and a bare '+1' is trivially a substring of
-      // any US Mobile Phone Number the card legitimately does show, which
-      // would make this check fail on a false positive.
+      await page.goto(`${BASE_URL}/company`); // `card` needs the read view's own 'Edit' link
+      // Guard against a bare digit-less country code (e.g. '+1' with no
+      // number) - trivially a substring of any US Mobile Phone Number, which'd false-positive this check.
       if (officePhoneValue.replace(/\D/g, '').length > 1) {
         await expect(card).not.toContainText(officePhoneValue);
       }
     });
 
     test("4.3 REAL BUG (corrected): the read-only card's 'Location' summary silently omits Address 2, though the Address/City segments render as two separate visual lines rather than one run-together word", async ({ page }) => {
-      // CORRECTION (2026-08-17): the plan's original claim was that
-      // Address and City run together with NO separating space at all
-      // (e.g. 'BroadwaySanta' as one visible word). Live re-verified while
-      // automating this exact scenario, via direct inspection of the
-      // Location heading's rendered DOM: the two segments are each wrapped
-      // in their own <span>, separated by a literal <br> element
-      // (`<span>1725 North Broadway</span><br><span>Santa Barbara
-      // County, ...</span>`). A real user therefore sees these as two
-      // separate lines, NOT run together as one word - `locator.innerText()`
-      // (which respects rendering, including <br>) confirms a genuine line
-      // break between them. The "no space" claim only reproduces if read
-      // via `textContent` (which ignores the <br> entirely) or the
-      // accessibility-tree "name" computation used by getByText/getByRole
-      // (which normalizes multiple text nodes by inserting a space) - both
-      // are testing-technique artifacts, not what a real user perceives.
-      // This is corrected here to test the real, live-verified behavior:
-      // NOT a visible concatenation bug, but Address 2 IS still genuinely,
-      // silently omitted from the summary - that part of the original
-      // finding does reproduce and is asserted below.
+      // CORRECTED: the plan claimed Address/City run together with no space,
+      // but they're two <span>s split by a real <br> - a real user sees two
+      // lines (see CLAUDE.md's innerText gotcha). Address 2 IS still omitted, though - that part reproduces.
       const card = companyDetailsCard(page);
       const locationHeading = card.getByRole('heading', { level: 6 }).nth(1);
       await expect(card.getByText('Location', { exact: true })).toBeVisible();
 
-      // 1. Inspect the exact rendered text of the read-only card's
-      // 'Location' field via innerText() (reflects real visual rendering,
-      // including line breaks from <br>, unlike textContent).
+      // 1. Read via innerText() (respects real rendering, unlike textContent).
       const locationInnerText = await locationHeading.innerText();
 
-      // expect: Address ('1725 North Broadway') and the City-onward segment
-      // are genuinely rendered on two separate lines (a real line break
-      // between them), not run together as one unreadable word.
+      // Address and City-onward render on two separate lines, not run together.
       expect(locationInnerText).toContain('1725 North Broadway\n');
       expect(locationInnerText).not.toContain('BroadwaySanta');
 
-      // expect, second finding (still reproduces): 'Suite 100' (the saved
-      // Address 2 value) does not appear anywhere in the Location summary
-      // at all - Address 2, like Office Phone Number/Company
-      // Website/Terms and Conditions, is captured and persisted by the
-      // edit form but never surfaced on the read-only card.
+      // Address 2 ('Suite 100') never appears - captured by the edit form but never surfaced on the read-only card.
       expect(locationInnerText).not.toContain('Suite 100');
 
       // Sanity-check the full expected content is otherwise present.
@@ -843,16 +518,12 @@ test.describe('Company Details', () => {
     });
 
     test("4.4 Company Email and Phone Number are fully independent of the logged-in user's own Profile Settings identity fields", async ({ page }) => {
-      // 1. Capture the Company Details card's current Email and Phone
-      // Number values, then navigate to /profile and inspect the account's
-      // own Email Address and Phone Number fields there.
+      // 1. Capture the card's Email/Phone Number, then compare against /profile's own account-identity fields.
       const card = companyDetailsCard(page);
       const headings = card.getByRole('heading', { level: 6 });
       await expect(headings).toHaveCount(5);
       const companyEmail = (await headings.nth(2).textContent())?.trim();
       const companyPhoneNumber = (await headings.nth(3).textContent())?.trim();
-      // Sanity: both are real, non-placeholder values on this account
-      // (already saved by earlier tests/exploration in this file).
       expect(companyEmail).not.toBe('-');
       expect(companyPhoneNumber).not.toBe('-');
 
@@ -860,21 +531,13 @@ test.describe('Company Details', () => {
       const profileEmail = page.getByRole('textbox', { name: 'Email Address' });
       const profilePhoneNumber = page.getByRole('textbox', { name: 'Phone Number' });
 
-      // expect: Profile Settings' 'Email Address' field is completely
-      // unchanged, still showing the account's real login email
-      // ('paul.freire+automation@crifa.com'), genuinely disabled/
-      // non-editable on that page - and genuinely different from the
-      // Company Details Email captured above.
+      // Profile's Email Address is unchanged, disabled, and genuinely different from Company Details' own Email.
       await expect(profileEmail).toHaveValue('paul.freire+automation@crifa.com');
       await expect(profileEmail).toBeDisabled();
       expect(companyEmail).not.toBe('paul.freire+automation@crifa.com');
 
-      // expect: Profile Settings' 'Phone Number' field is also completely
-      // unchanged, still showing '+1 (212) 555-0100' - confirming the
-      // Company Details card's Email and Phone Number are wholly
-      // independent, company-record-scoped fields, safe to freely edit/
-      // test without any risk to the account's own login identity or
-      // session.
+      // Same for Phone Number - confirms these are wholly independent,
+      // company-scoped fields, safe to edit without risking login identity.
       await expect(profilePhoneNumber).toHaveValue('+1 (212) 555-0100');
       const profilePhoneDigits = (await profilePhoneNumber.inputValue()).replace(/\D/g, '');
       const companyPhoneDigits = (companyPhoneNumber ?? '').replace(/\D/g, '');
@@ -882,77 +545,48 @@ test.describe('Company Details', () => {
     });
 
     test("4.5 REAL BUG: re-entering the edit form after a save fails to pre-fill the 'State' dropdown, even though the read-only card's Location correctly reflects the saved state", async ({ page }) => {
-      // 1. Establish the precondition this scenario needs by performing a
-      // real save with State genuinely selected as 'California', so the
-      // backend genuinely holds 'California' before re-entering the form -
-      // matching the plan's "After the save in section 4.1 (State saved as
-      // 'California'...)" precondition explicitly, rather than relying on
-      // it being an incidental side effect of a previous test.
+      // 1. Save with State genuinely selected as 'California' first, so the backend holds it before re-entering the form.
       await page.goto(`${BASE_URL}/company?edit=true`);
       const stateCombobox = page.getByRole('combobox', { name: 'State Select' });
       await stateCombobox.click();
       await page.getByRole('option', { name: 'California', exact: true }).click();
       await saveCompanyDetailsAndWaitForNavigation(page);
 
-      // expect: the read-only card's 'Location' correctly reflects the
-      // saved state - confirming State really was genuinely persisted to
-      // the backend by this save, setting up the real defect asserted next.
+      // The read-only card confirms State really persisted, setting up the real defect asserted next.
       await expect(companyDetailsCard(page).getByText(/California/)).toBeVisible();
 
-      // 1 (continued). Navigate to /company?edit=true again.
+      // 2. Navigate to /company?edit=true again.
       await page.goto(`${BASE_URL}/company?edit=true`);
 
-      // expect, real defect: the 'State' dropdown shows its empty
-      // placeholder text 'Select' (confirmed via direct inspection that the
-      // underlying input's value is an empty string), even though 'City',
-      // 'Zip Code', and 'Address' all correctly pre-fill with their
-      // previously saved values on this same form load - this is a real,
-      // isolated pre-fill/hydration bug specific to just the State
-      // combobox, not a symptom of the whole address block failing to
-      // load.
+      // REAL BUG: State shows empty 'Select' even though City/Zip/Address
+      // all correctly pre-fill - isolated to just the State combobox.
       await expect(page.getByRole('combobox', { name: 'State Select' })).toHaveText('Select');
       await expect(page.locator('input[name="state"]')).toHaveValue('');
       await expect(page.getByRole('textbox', { name: 'City' })).toHaveValue('Santa Barbara County');
       await expect(page.getByRole('textbox', { name: 'Zip Code' })).toHaveValue('93458');
       await expect(page.getByRole('combobox', { name: 'Address' })).toHaveValue('1725 North Broadway');
 
-      // 2. Attempt to click 'Save' immediately on this re-entered form
-      // without touching State.
-      // expect: 'Save' is disabled (confirming State really is being
-      // treated as empty/invalid by the form, not just visually blank) - a
-      // user re-entering this form to make any unrelated edit is forced to
-      // always re-select their State from the dropdown again, every single
-      // time, even though it was already saved correctly.
+      // 3. Save is disabled without touching State - the form genuinely
+      // treats it as invalid, forcing the user to re-select it on every edit.
       await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
     });
   });
 
   test.describe('Company Details — Cancel and Discard Behavior', () => {
     test('5.1 Cancel on a pristine (non-dirtied) edit form navigates back to /company with no changes', async ({ page }) => {
-      // Capture the read-only card's current values before entering edit
-      // mode, per this project's discover-don't-hardcode portability
-      // pattern (see SEED_FIRST_NAME/discoverSeedBaseline() in
-      // tests/profile-settings.spec.ts and test 2.5's Office Phone Number
-      // handling in this file) - the baseline is discovered live rather
-      // than assumed, since it may have been touched by earlier sections'
-      // cleanup/restore steps.
+      // Discovers the baseline live rather than hardcoding it (see CLAUDE.md) - earlier sections may have changed it.
       const card = companyDetailsCard(page);
       const headingsBefore = card.getByRole('heading', { level: 6 });
       await expect(headingsBefore).toHaveCount(5);
       const valuesBefore = await headingsBefore.allTextContents();
 
-      // 1. Navigate to /company?edit=true and, without touching any field,
-      // click 'Cancel'.
+      // 1. Without touching any field, click 'Cancel' - navigates back to /company (URL loses '?edit=true').
       await page.goto(`${BASE_URL}/company?edit=true`);
       await expect(page.getByRole('button', { name: 'Save' })).toBeVisible();
       await page.getByRole('button', { name: 'Cancel' }).click();
-
-      // expect: the browser navigates back to '/company' (URL loses
-      // '?edit=true').
       await expect(page).toHaveURL(`${BASE_URL}/company`);
 
-      // expect: the read-only card shows exactly the same values it showed
-      // before entering edit mode - a clean, true no-op.
+      // Read-only card shows exactly the same values as before entering edit mode - a clean, true no-op.
       const headingsAfter = companyDetailsCard(page).getByRole('heading', { level: 6 });
       await expect(headingsAfter).toHaveCount(5);
       const valuesAfter = await headingsAfter.allTextContents();
@@ -960,18 +594,12 @@ test.describe('Company Details', () => {
     });
 
     test("5.2 Cancel on a dirtied edit form discards all unsaved changes cleanly", async ({ page }) => {
-      // Discover the current, real 'Company Name' value live (not
-      // hardcoded) before dirtying it, per this project's
-      // discover-don't-hardcode portability pattern - the value is compared
-      // against later rather than assuming a specific literal like "QA
-      // Automation Test Co".
+      // Discovers the current value live, not hardcoded, before dirtying it.
       const card = companyDetailsCard(page);
       const originalCompanyName = (await card.getByRole('heading', { level: 6 }).first().textContent())?.trim();
       expect(originalCompanyName).toBeTruthy();
 
-      // 1. On /company?edit=true, type a deliberately different,
-      // clearly-temporary value into 'Company Name', then click 'Cancel'
-      // instead of 'Save'.
+      // 1. Type a temporary value into 'Company Name', then click 'Cancel' instead of 'Save'.
       await page.goto(`${BASE_URL}/company?edit=true`);
       const companyName = page.getByRole('textbox', { name: 'Company Name' });
       await expect(companyName).toHaveValue(originalCompanyName!);
@@ -980,16 +608,12 @@ test.describe('Company Details', () => {
       await expect(companyName).toHaveValue('TEMP DIRTY VALUE');
       await page.getByRole('button', { name: 'Cancel' }).click();
 
-      // expect: the browser navigates back to '/company', and the
-      // read-only card's 'Company Name' shows the ORIGINAL, previously-saved
-      // value - 'TEMP DIRTY VALUE' was never sent to the backend and never
-      // persisted.
+      // Navigates back to /company with the ORIGINAL value - 'TEMP DIRTY VALUE' was never persisted.
       await expect(page).toHaveURL(`${BASE_URL}/company`);
       await expect(companyDetailsCard(page).getByRole('heading', { name: originalCompanyName!, exact: true })).toBeVisible();
       await expect(companyDetailsCard(page).getByRole('heading', { name: 'TEMP DIRTY VALUE' })).toHaveCount(0);
 
-      // (confirmed by re-entering /company?edit=true afterward and seeing
-      // the original value still present, not the temporary one).
+      // Confirmed again by re-entering the edit form.
       await page.goto(`${BASE_URL}/company?edit=true`);
       await expect(page.getByRole('textbox', { name: 'Company Name' })).toHaveValue(originalCompanyName!);
     });

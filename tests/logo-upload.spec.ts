@@ -8,11 +8,7 @@ const BASE_URL = requireEnv('BASE_URL');
 const SEED_USERNAME = requireEnv('TEST_USERNAME');
 const SEED_PASSWORD = requireEnv('TEST_LOGIN_PASSWORD');
 
-// Logs in as the shared seed account and lands on /company - the first tab
-// shown immediately after login, and the page hosting the Logo Upload card
-// this file covers. Mirrors loginAsSeedAndGoToProfile() in
-// tests/profile-settings.spec.ts, just targeting /company instead of
-// /profile.
+/** Logs in as the shared seed account and lands on /company. */
 async function loginAsSeedAndGoToCompany(page: Page) {
   await page.goto(`${BASE_URL}/login`);
   await page.locator('input[name="username"]').fill(SEED_USERNAME);
@@ -23,27 +19,12 @@ async function loginAsSeedAndGoToCompany(page: Page) {
   await expect(page.getByRole('button', { name: 'Upload' })).toBeVisible();
 }
 
-// The "Logo Upload" heading text appears TWICE in the DOM: once as a hidden
-// (aria-expanded="false") mobile-layout accordion heading, and once as the
-// real, visible desktop CardHeader title. Scoping every locator below to
-// this specific card (identified by containing the Upload button, which is
-// live-verified to be unique on the page) avoids strict-mode ambiguity
-// against that hidden duplicate without relying on a raw MUI class name
-// alone.
+/** Scopes to the real Logo Upload card, not its hidden mobile-accordion duplicate heading. */
 function logoUploadCard(page: Page) {
   return page.locator('.MuiCard-root').filter({ has: page.getByRole('button', { name: 'Upload' }) });
 }
 
-// Injects a synthetic image file into the hidden `<input name="logo">`
-// element by drawing a canvas image, converting it to a Blob, and wiring it
-// up via DataTransfer + a manual "change" event. Same in-page
-// canvas+DataTransfer technique already used and documented in
-// tests/profile-settings.spec.ts's injectCanvasImageFile() for the Profile
-// Photo Upload crop-modal tests, just targeting this page's
-// `input[name="logo"]` element instead of `#profilePicture`. Unlike Profile
-// Photo Upload, there is no crop modal to interact with afterward here -
-// live-verified: dispatching "change" is the entire upload trigger, and
-// immediately fires the real POST /company request.
+/** Injects a synthetic image via canvas + DataTransfer + "change" - unlike Profile Photo, no crop modal, fires the real POST immediately. */
 async function injectLogoImageFile(
   page: Page,
   { width, height, fileName, mimeType = 'image/png', color = 'blue' }: { width: number; height: number; fileName: string; mimeType?: string; color?: string }
@@ -68,13 +49,7 @@ async function injectLogoImageFile(
   );
 }
 
-// Same in-page canvas+DataTransfer technique as injectLogoImageFile() above,
-// but fills the canvas with per-pixel random noise so the resulting PNG
-// blob is a large, non-trivially-compressible size well over the 500KB
-// limit (used for the oversized-file scenario in test 3.1, so toBlob()
-// doesn't optimize a large flat-color image away to almost nothing) -
-// mirrors injectNoisyCanvasImageFile() in tests/profile-settings.spec.ts,
-// just targeting this page's `input[name="logo"]` element.
+/** Same as `injectLogoImageFile()` but fills the canvas with random noise, so the PNG can't compress away to almost nothing (used for oversized-file tests). */
 async function injectNoisyLogoImageFile(page: Page, { width, height, fileName }: { width: number; height: number; fileName: string }) {
   await page.evaluate(
     async ({ width, height, fileName }) => {
@@ -97,13 +72,7 @@ async function injectNoisyLogoImageFile(page: Page, { width, height, fileName }:
   );
 }
 
-// Injects a plain-text (non-image) file into the logo input the same
-// DataTransfer-bypass way as injectLogoImageFile() above, but skipping the
-// canvas/toBlob step entirely, to probe whether the app performs any real
-// image-decoding-based validation on the selected "logo" beyond the file
-// input's `accept` attribute (a browser/OS-level filename filter only, not
-// a real validation boundary) - mirrors injectTextFile() in
-// tests/profile-settings.spec.ts.
+/** Injects a plain-text file, bypassing the `accept` attribute, to probe whether the app validates beyond the filename filter. */
 async function injectTextLogoFile(page: Page, fileName: string, content: string) {
   await page.evaluate(
     ({ fileName, content }) => {
@@ -118,13 +87,7 @@ async function injectTextLogoFile(page: Page, fileName: string, content: string)
   );
 }
 
-// Injects a file with a given filename/MIME type but whose actual byte
-// content is either random garbage (to simulate a corrupted/malformed
-// "image", or an arbitrary non-image file wearing a misleading extension
-// like .pdf) or completely empty (a genuine 0-byte file, via the default
-// byteLength of 0) - the random bytes are generated entirely in-page so no
-// large byte array needs to cross the page.evaluate() serialization
-// boundary.
+/** Injects a file with random byte content (or 0 bytes) under a given filename/MIME type, simulating a corrupted or empty file. */
 async function injectRawBytesLogoFile(page: Page, { fileName, mimeType, byteLength = 0 }: { fileName: string; mimeType: string; byteLength?: number }) {
   await page.evaluate(
     ({ fileName, mimeType, byteLength }) => {
@@ -141,22 +104,7 @@ async function injectRawBytesLogoFile(page: Page, { fileName, mimeType, byteLeng
   );
 }
 
-// Live-verified real backend behavior (not a test flake): right after a
-// successful upload, the card's <img src> is NOT its final value yet - the
-// backend appears to asynchronously post-process the uploaded file (likely
-// generating an optimized/resized variant), swapping the src to a DIFFERENT
-// S3 URL, and this can keep changing for up to ~15s after the upload
-// response resolves, even with no navigation at all (confirmed live via a
-// standalone diagnostic script: waiting only ~10s and seeing two consecutive
-// matching reads was NOT enough - it can plateau briefly then change again;
-// waiting a full 15s produced a src that then stayed byte-identical across
-// four separate full-page reloads). Polls every 1s for up to 25s, requiring
-// THREE consecutive matching reads (3s of true stability, not just one
-// lucky plateau) that also differ from `differentFrom` (if given), before
-// treating the src as final - needed whenever a test wants to assert the
-// upload's FINAL src (e.g. across a reload, or against the previous logo's
-// src), since comparing too early would compare against a value the backend
-// is still about to replace.
+/** Polls for the logo `<img src>` to stop changing (3 matching reads) before treating it final - the backend can swap it for ~15s post-upload (see CLAUDE.md). */
 async function waitForStableImageSrc(image: import('@playwright/test').Locator, differentFrom?: string | null): Promise<string> {
   let previous: string | null = null;
   let matchStreak = 0;
@@ -174,15 +122,7 @@ async function waitForStableImageSrc(image: import('@playwright/test').Locator, 
   throw new Error(`Logo image src never stabilized after upload; last seen value: ${previous}`);
 }
 
-// Injects a logo file (see injectLogoImageFile() above) and waits for the
-// real POST /company response it triggers, rather than just trusting the
-// success toast text. There is no separate "Save" button on this page -
-// unlike Profile Photo Upload's crop-modal + Save flow, selecting a valid
-// file immediately uploads it - so this is the equivalent of
-// saveAndWaitForSuccess() in tests/profile-settings.spec.ts, needed here
-// because test 2.2 below performs a second real upload shortly after 2.1's,
-// and this project's documented "don't trust the toast for a second save"
-// gotcha applies equally to two close-together real uploads.
+/** Injects a logo file and waits for the real POST /company response, not just the toast (needed since 2.2 uploads twice in close succession - see CLAUDE.md). */
 async function injectLogoImageFileAndWaitForUpload(
   page: Page,
   options: { width: number; height: number; fileName: string; mimeType?: string; color?: string }
@@ -194,35 +134,15 @@ async function injectLogoImageFileAndWaitForUpload(
   expect(response.ok()).toBe(true);
 }
 
-// The exact, generically-worded dialog body text that live verification
-// confirmed is shared by every size/dimension/undecodable-file rejection in
-// section 3 below - it never distinguishes which specific rule failed (too
-// big, too small, or simply unparseable as an image at all).
+// This generic dialog text is shared by every size/dimension/undecodable-file rejection - it never names which rule failed.
 const LOGO_ERROR_MESSAGE = 'Your logo needs to be at least 150x150 px and should not exceed 500KB. Please review your file and try again.';
 
-// Locates the error dialog's own heading specifically. Live-verified via
-// direct DOM inspection: the page ALSO contains two other, permanently
-// hidden `<h3>`/`<h6>` elements elsewhere with the exact same "Logo Upload"
-// text (the same hidden mobile-layout duplicates noted on logoUploadCard()
-// above), so a plain `getByRole('heading', { name: 'Logo Upload' })` would
-// be ambiguous (3 matches) the instant this dialog is open. The dialog's
-// own heading is live-verified to always render as an `<h5>` - live-checked
-// to be the ONLY `<h5>` on this page in both the default state (0 matches)
-// and while the dialog is open (exactly 1 match) - so scoping by
-// `level: 5` disambiguates it reliably without needing a `role="dialog"`
-// container to scope into (this app's dialog is not exposed with that
-// role).
+/** Locates the error dialog's heading - the only `<h5>` on the page, disambiguating it from two other hidden elements sharing the same text. */
 function logoErrorDialogHeading(page: Page) {
   return page.getByRole('heading', { name: 'Logo Upload', exact: true, level: 5 });
 }
 
-// Asserts the generic size/dimension/unparseable-file error dialog (see
-// LOGO_ERROR_MESSAGE above) is visible with its live-verified heading, body
-// text, and single 'Continue' button, then dismisses it via that button -
-// shared by every rejected-file sub-case in test 3.3 below, since live
-// verification confirmed a non-image .txt file, a fake .pdf, a
-// byte-corrupted "PNG", and a genuine 0-byte file all funnel into this
-// exact same dialog.
+/** Asserts the generic rejection dialog and dismisses it via 'Continue' - shared by every 3.3 sub-case. */
 async function expectLogoErrorDialogAndDismiss(page: Page) {
   const dialogHeading = logoErrorDialogHeading(page);
   await expect(dialogHeading).toBeVisible();
@@ -233,12 +153,7 @@ async function expectLogoErrorDialogAndDismiss(page: Page) {
   await expect(dialogHeading).not.toBeVisible();
 }
 
-// Every test below reads (and, in later sections of this file, writes) the
-// ONE shared seed account (pfautomation) that the rest of this suite also
-// depends on for login. Same trade-off already documented and applied in
-// tests/profile-settings.spec.ts: serial + chromium-only avoids racing
-// parallel browser projects/workers on this single account's Logo Upload
-// state.
+// Reads/writes the shared seed account - serial + chromium-only avoids racing parallel browser projects (see CLAUDE.md).
 test.describe('Logo Upload', () => {
   test.describe.configure({ mode: 'serial' });
 
@@ -249,37 +164,18 @@ test.describe('Logo Upload', () => {
 
   test.describe('Logo Upload — Empty/Default State', () => {
     test('1.1 Logo Upload card shows a placeholder image and expected caption/button when no logo has ever been uploaded', async ({ page }) => {
-      // 1. Log in with the seed account (pfautomation / 123456Pp!) and land
-      // on /company (the default first tab after login, done by
-      // beforeEach).
+      // 1. Land on /company before making any edits (done by beforeEach).
       await expect(page).toHaveTitle('Company | Job Link');
 
       const card = logoUploadCard(page);
-
-      // A 'Logo Upload' card heading is visible.
       await expect(card.getByText('Logo Upload', { exact: true })).toBeVisible();
 
-      // NOTE: per the plan's own Application Overview caveat, the seed
-      // account's company logo was left as a saved test PNG at the end of
-      // the exploration session that produced this plan, so this account
-      // is NOT reliably in the pristine "no logo ever uploaded" state at
-      // test time (confirmed live: the card currently renders an <img>
-      // pointing at a real saved S3 logo, not a placeholder icon). The
-      // plan's "shows a dark-grey placeholder box with a generic image
-      // icon" assertion is therefore intentionally NOT asserted here - it
-      // would be a false/unreliable check against this shared account's
-      // actual current state, not a genuine empty-state verification. Only
-      // the state that holds true regardless of whether a logo currently
-      // exists is asserted below.
-
-      // Directly beneath the placeholder/logo, a caption reads exactly:
-      // 'Make sure your logo has at least 150x150 px and no more than
-      // 500KB'.
+      // ADAPTED: this account permanently has a saved logo (required-field
+      // side effect, see CLAUDE.md), so this doesn't assert the plan's
+      // "shows a placeholder" check - only what holds true regardless.
       await expect(card.getByRole('heading', { name: 'Make sure your logo has at least 150x150 px and no more than 500KB' })).toBeVisible();
 
-      // Below the caption, a single blue 'Upload' button is visible and
-      // enabled - there is no second button (no 'Remove', 'Delete', or
-      // 'Cancel' button present in the default state).
+      // A single 'Upload' button - no 'Remove'/'Delete'/'Cancel' in the default state.
       const uploadButton = card.getByRole('button', { name: 'Upload' });
       await expect(uploadButton).toBeVisible();
       await expect(uploadButton).toBeEnabled();
@@ -290,30 +186,18 @@ test.describe('Logo Upload', () => {
       const uploadButton = logoUploadCard(page).getByRole('button', { name: 'Upload' });
       const fileInput = page.locator('input[name="logo"]');
 
-      // 1. On /company, click the 'Upload' button in the Logo Upload card.
+      // 1. Click 'Upload' - a native OS file chooser opens immediately, no intermediate in-app modal.
       const fileChooserPromise = page.waitForEvent('filechooser');
       await uploadButton.click();
       const fileChooser = await fileChooserPromise;
-
-      // A native OS file chooser opens immediately - no intermediate
-      // in-app modal, dropdown, or menu appears first.
       expect(fileChooser).toBeTruthy();
 
-      // Live-verified via DOM inspection: the underlying
-      // `<input type="file" name="logo">` has accept="image/jpeg,image/png"
-      // and multiple=false - notably narrower than the equivalent Profile
-      // Photo input on /profile, which additionally accepts image/webp.
+      // The input accepts only jpeg/png, single file - narrower than Profile Photo's (which also accepts webp).
       await expect(fileInput).toHaveAttribute('accept', 'image/jpeg,image/png');
       await expect(fileInput).toHaveJSProperty('multiple', false);
 
-      // 2. Cancel/dismiss the native file chooser without selecting any
-      // file.
+      // 2. Cancel the file chooser without selecting anything - a true no-op, no error/toast/partial state.
       await fileChooser.setFiles([]);
-
-      // Live-verified: the page remains completely unchanged - the
-      // placeholder/logo image, caption, and 'Upload' button are all
-      // exactly as before, with no error, no toast, and no partial/broken
-      // intermediate state - a true no-op.
       await expect(uploadButton).toBeVisible();
       await expect(uploadButton).toBeEnabled();
     });
@@ -321,97 +205,58 @@ test.describe('Logo Upload', () => {
 
   test.describe('Logo Upload — Valid Upload Flow (No Crop Modal)', () => {
     test('2.1 Selecting a valid image immediately uploads and saves it — no intermediate crop/preview modal exists', async ({ page }) => {
-      // waitForStableImageSrc() below can take up to ~25s (real backend
-      // post-processing delay, see its own comment) - triple the default
-      // 30s test timeout so that wait isn't mistaken for a hang.
-      test.slow();
+      test.slow(); // waitForStableImageSrc() can take up to ~25s (see CLAUDE.md)
       const card = logoUploadCard(page);
       const cardImage = card.locator('img');
 
-      // 1. On /company, select a valid, small (e.g. 300x300px, well under
-      // 500KB) PNG file via the Upload button's file chooser (injected
-      // in-page; see injectLogoImageFile()). This also sends a real POST
-      // request to /company (multipart/form-data, containing the selected
-      // file) immediately, with no separate user confirmation step.
+      // 1. Select a valid, small PNG - immediately sends a real POST to /company, no confirmation step.
       await injectLogoImageFileAndWaitForUpload(page, { width: 300, height: 300, fileName: 'valid-logo.png', color: 'green' });
 
-      // Notable finding, confirmed live: NO crop/zoom modal of any kind
-      // appears (unlike Profile Photo Upload's 'Change Profile Picture'
-      // modal with its zoom slider and Cancel/Ok buttons) - the file is
-      // submitted directly, with no dialog and no slider ever rendered.
+      // NO crop/zoom modal appears here, unlike Profile Photo Upload - the file submits directly.
       await expect(page.getByRole('dialog')).not.toBeVisible();
       await expect(page.getByRole('slider')).toHaveCount(0);
 
-      // A green/success toast appears with the exact text 'Your logo was
-      // uploaded successfully'.
       await expect(page.locator('text=Your logo was uploaded successfully')).toBeVisible();
 
-      // The Logo Upload card's placeholder/previous image is immediately
-      // replaced with the newly uploaded image, displayed at the same
-      // square dimensions as the placeholder. Wait for the backend's
-      // async post-processing to settle (see waitForStableImageSrc() above)
-      // before treating this as the image's real, final src.
+      // Image replaces the previous one immediately - wait for the backend's async post-processing to settle first.
       await expect(cardImage).toBeVisible();
       const uploadedSrc = await waitForStableImageSrc(cardImage);
 
-      // 2. Reload the page (full navigation, not just a soft refresh).
+      // 2. Reload (full navigation) - persists, confirming a genuine backend save.
       await page.goto(`${BASE_URL}/company`);
-
-      // Live-verified: the newly uploaded logo persists after reload,
-      // confirming this was a genuine backend save, not just a client-side
-      // preview.
       await expect(cardImage).toBeVisible();
       await expect(cardImage).toHaveAttribute('src', uploadedSrc);
 
-      // Live-verified, minor cosmetic quirk: the success toast text ('Your
-      // logo was uploaded successfully') is also shown again immediately
-      // after this reload - the toast appears to be re-shown on the very
-      // next full page load after a successful upload, not just at the
-      // moment of upload itself.
+      // Minor quirk: the success toast is shown again on this reload too, not just at upload time.
       await expect(page.locator('text=Your logo was uploaded successfully')).toBeVisible();
     });
 
     test("2.2 Uploading a new logo when one already exists replaces it in place — the button remains labeled 'Upload', not 'Replace'", async ({ page }) => {
-      // See the test.slow() comment in 2.1 above - same waitForStableImageSrc() cost applies here.
-      test.slow();
+      test.slow(); // same waitForStableImageSrc() cost as 2.1
       const card = logoUploadCard(page);
       const uploadButton = card.getByRole('button', { name: 'Upload' });
       const cardImage = card.locator('img');
 
-      // With a logo already saved from a previous upload (e.g. a green
-      // square) - this describe runs serial against the one shared seed
-      // account, so test 2.1's upload above is still saved server-side at
-      // the start of this test.
+      // 2.1's upload is still saved server-side (this describe runs serial against the one shared account).
       await expect(cardImage).toBeVisible();
       const previousSrc = await cardImage.getAttribute('src');
       expect(previousSrc).toBeTruthy();
       await expect(uploadButton).toHaveText('Upload');
 
-      // 1. Select a different valid image (e.g. an orange 150x150px
-      // square) via the same 'Upload' button.
+      // 1. Select a different valid image via the same 'Upload' button.
       await injectLogoImageFileAndWaitForUpload(page, { width: 150, height: 150, fileName: 'replacement-logo.png', color: 'orange' });
 
-      // Live-verified: the button's label and appearance never change to
-      // 'Replace', 'Change', or similar at any point, before or after a
-      // logo already exists - it is exactly the same 'Upload' button as
-      // before this replacement, doing exactly the same immediate-upload
-      // action.
+      // Button never relabels to 'Replace'/'Change' - same button, same immediate-upload action.
       await expect(uploadButton).toHaveText('Upload');
       await expect(card.getByRole('button')).toHaveCount(1);
 
-      // The new image immediately replaces the old one in the card, and
-      // the same 'Your logo was uploaded successfully' toast appears,
-      // confirming a clean overwrite/replace behavior with no separate
-      // confirmation step ('are you sure you want to replace your existing
-      // logo?') of any kind.
+      // New image replaces the old one with no separate 'are you sure' confirmation step.
       await expect(page.locator('text=Your logo was uploaded successfully')).toBeVisible();
       await expect(cardImage).toBeVisible();
       const newSrc = await waitForStableImageSrc(cardImage, previousSrc);
       expect(newSrc).not.toBe(previousSrc);
 
-      // 2. (Note, not a step) Look for any 'Remove logo' / 'Delete logo' /
-      // 'Reset to default' affordance anywhere in the Logo Upload card, in
-      // any hover state, or elsewhere on the Company page.
+      // 2. No 'Remove logo'/'Delete logo'/'Reset' affordance exists anywhere, including on hover.
       await cardImage.hover();
       await expect(page.getByRole('button', { name: /remove/i })).toHaveCount(0);
       await expect(page.getByRole('button', { name: /delete/i })).toHaveCount(0);
@@ -432,53 +277,26 @@ test.describe('Logo Upload', () => {
         }
       });
 
-      // 1. Select an image file that is well over 500KB (e.g. an
-      // in-browser-generated 1600x1600px PNG filled with per-pixel random
-      // noise, several MB in size, chosen specifically to defeat PNG's
-      // lossless compression and guarantee a large real byte size) but with
-      // valid dimensions (well over 150x150px).
+      // 1. Select a noisy 1600x1600px PNG (defeats PNG compression, guaranteeing a large real size) with valid dimensions.
       await injectNoisyLogoImageFile(page, { width: 1600, height: 1600, fileName: 'oversized-logo.png' });
 
-      // Live-verified, notable finding: a modal dialog appears, titled
-      // 'Logo Upload', with body text reading exactly the generic
-      // size/dimension message, and a single 'Continue' button - this
-      // exact same generic message is used for size violations, dimension
-      // violations, and files that cannot be parsed as an image at all
-      // (see later tests).
+      // The same generic dialog used for size, dimension, and unparseable-file rejections.
       const dialogHeading = logoErrorDialogHeading(page);
       await expect(dialogHeading).toBeVisible();
       await expect(page.getByText(LOGO_ERROR_MESSAGE)).toBeVisible();
       await expect(page.getByRole('button', { name: 'Continue' })).toBeVisible();
 
-      // Live-verified via the browser's network request log: NO
-      // POST /company request is ever sent as a result of selecting this
-      // oversized file - the size check runs entirely client-side, before
-      // any upload attempt, confirming the 500KB limit is a real, enforced
-      // pre-upload gate, not a server-side rejection after the fact.
+      // NO POST /company is ever sent - the 500KB check runs entirely client-side, before any upload attempt.
       expect(companyPostRequests).toHaveLength(0);
 
-      // CORRECTION to the live-verified plan, found while automating this
-      // exact scenario: the plan states the previous logo "remains visible
-      // behind/before the modal". Live re-verification (isolated standalone
-      // script, reproduced consistently) shows the card's <img> is actually
-      // removed from the DOM entirely (locator resolves to 0 elements) for
-      // as long as this error dialog is open - not merely hidden behind it.
-      // It reliably reappears with the exact same, unmodified src once the
-      // dialog is dismissed, so the underlying saved logo is never actually
-      // lost or corrupted - this is a harmless render quirk (the card
-      // apparently unmounts its <img> while showing the rejection dialog),
-      // not a data-loss bug. Asserting the unchanged src is only meaningful
-      // once the dialog is gone, so that check moves below, after Continue.
+      // CORRECTED: the plan claimed the logo stays visible behind the modal
+      // - it's actually removed from the DOM entirely while open (harmless render quirk, not data loss), reappearing after Continue.
       await expect(cardImage).toHaveCount(0);
 
-      // 2. Click the 'Continue' button to dismiss the dialog.
+      // 2. Click 'Continue' to dismiss.
       await page.getByRole('button', { name: 'Continue' }).click();
 
-      // The dialog closes cleanly, and the Logo Upload card is back to its
-      // prior state (previous logo or placeholder, 'Upload' button
-      // enabled) with no lingering error state - confirming the rejected
-      // oversized file never actually overwrote or cleared the existing
-      // saved logo.
+      // Back to prior state - the rejected file never overwrote the saved logo.
       await expect(dialogHeading).not.toBeVisible();
       await expect(cardImage).toHaveAttribute('src', previousSrc!);
       await expect(logoUploadCard(page).getByRole('button', { name: 'Upload' })).toBeEnabled();
@@ -495,33 +313,18 @@ test.describe('Logo Upload', () => {
         }
       });
 
-      // 1. Select a valid, tiny-file-size (well under 500KB) image that is
-      // exactly 149x149px.
+      // 1. Select a tiny-file-size image that is exactly 149x149px - 1px under the minimum on both axes.
       await injectLogoImageFile(page, { width: 149, height: 149, fileName: 'tiny-149.png', color: 'red' });
-
-      // Live-verified: the exact same generic error dialog appears,
-      // confirming the dimension check independently rejects a file that is
-      // comfortably within the size limit but just 1px under the minimum
-      // dimension on both axes.
       await expect(dialogHeading).toBeVisible();
       await expect(page.getByText(LOGO_ERROR_MESSAGE)).toBeVisible();
-
-      // No POST /company request is sent.
       expect(companyPostRequests).toHaveLength(0);
 
-      // 2. Dismiss the dialog (click 'Continue'), then select a new valid
-      // image that is exactly 150x150px (the stated minimum, inclusive).
+      // 2. Dismiss, then select exactly 150x150px (the stated minimum).
       await page.getByRole('button', { name: 'Continue' }).click();
       await expect(dialogHeading).not.toBeVisible();
-
       await injectLogoImageFileAndWaitForUpload(page, { width: 150, height: 150, fileName: 'exact-150.png', color: 'purple' });
 
-      // Live-verified, confirms the boundary is inclusive: this exact
-      // 150x150px image is ACCEPTED - no error dialog appears, a real
-      // POST /company request is sent (awaited above), and the success
-      // toast 'Your logo was uploaded successfully' appears, proving
-      // '150x150px' in the stated constraint text means '150x150px or
-      // larger', not 'larger than 150x150px'.
+      // ACCEPTED - confirms the boundary is inclusive ('150x150 or larger', not 'larger than 150x150').
       await expect(dialogHeading).not.toBeVisible();
       await expect(page.locator('text=Your logo was uploaded successfully')).toBeVisible();
       await expect(cardImage).toBeVisible();
@@ -538,52 +341,25 @@ test.describe('Logo Upload', () => {
         }
       });
 
-      // 1. Bypass the OS-level accept-attribute filter (via direct
-      // DOM/DataTransfer manipulation) and supply a plain-text file (.txt,
-      // content 'not an image') as the selected logo.
+      // 1. Bypass the `accept` filter with a plain-text file - same generic
+      // dialog, consistent with the app decoding pixel dimensions and falling back on failure.
       await injectTextLogoFile(page, 'notes.txt', 'not an image');
-
-      // Live-verified: the same generic 'Your logo needs to be at least
-      // 150x150 px and should not exceed 500KB. Please review your file and
-      // try again.' dialog appears (not a distinct 'unsupported file type'
-      // or 'invalid image' message) - the app appears to attempt to read
-      // the file's pixel dimensions to validate it, and when that fails
-      // (because a .txt file has no image data), it falls back to this same
-      // generic message rather than a more accurate one.
       await expectLogoErrorDialogAndDismiss(page);
 
-      // 2. Dismiss the dialog. Supply a fake .pdf file (arbitrary bytes,
-      // `.pdf` extension, `application/pdf` MIME type) as the selected
-      // logo.
+      // 2. A fake .pdf - identical dialog.
       await injectRawBytesLogoFile(page, { fileName: 'fake-document.pdf', mimeType: 'application/pdf', byteLength: 64 });
-
-      // Live-verified: identical generic error dialog appears again.
       await expectLogoErrorDialogAndDismiss(page);
 
-      // 3. Dismiss the dialog. Supply a file with a `.png` extension and
-      // `image/png` MIME type, but whose actual byte content is
-      // random/garbage data (not valid PNG image data) - simulating a
-      // corrupted or malformed 'image' file.
+      // 3. A .png with corrupt byte content - identical dialog, confirming
+      // validation actually decodes the file, not just its extension/MIME type.
       await injectRawBytesLogoFile(page, { fileName: 'corrupt-logo.png', mimeType: 'image/png', byteLength: 200 });
-
-      // Live-verified: identical generic error dialog appears yet again,
-      // confirming the validation is based on actually attempting to
-      // decode/measure the file as an image (dimensions/renderability), not
-      // merely trusting its extension or declared MIME type.
       await expectLogoErrorDialogAndDismiss(page);
 
-      // 4. Dismiss the dialog. Supply a genuine 0-byte file with a `.png`
-      // extension and `image/png` MIME type.
+      // 4. A genuine 0-byte .png - identical dialog too.
       await injectRawBytesLogoFile(page, { fileName: 'empty-logo.png', mimeType: 'image/png', byteLength: 0 });
-
-      // Live-verified: identical generic error dialog appears, confirming a
-      // completely empty file is handled the same as any other
-      // non-parseable input.
       await expectLogoErrorDialogAndDismiss(page);
 
-      // In all four of the above cases, no POST /company request is ever
-      // sent, and the previously saved/displayed logo is left completely
-      // undisturbed.
+      // None of the four sent a POST /company or disturbed the saved logo.
       expect(companyPostRequests).toHaveLength(0);
       await expect(cardImage).toHaveAttribute('src', previousSrc!);
     });
@@ -592,23 +368,8 @@ test.describe('Logo Upload', () => {
       const cardImage = logoUploadCard(page).locator('img');
       const previousSrc = await cardImage.getAttribute('src');
 
-      // 1. Bypass the OS-level accept-attribute filter and supply a
-      // genuinely valid, well-formed WEBP image (valid pixel dimensions
-      // well over 150x150px, valid small file size well under 500KB, real
-      // WEBP-encoded bytes generated in-page via
-      // canvas.toBlob(cb, 'image/webp'), an `image/webp` MIME type and
-      // `.webp` filename extension) as the selected logo.
-      // Intercepts the POST /company response via page.route() instead of
-      // reading response.text() after the fact - live-verified this is
-      // necessary here: even reading the body inside the very same
-      // `.then()` as waitForResponse() intermittently throws "Response body
-      // is not available for a response that was navigated away from"
-      // (reproduced across repeated runs), apparently because this app's
-      // client-side router does something (e.g. a background
-      // refresh/navigation) racing against the browser's own buffering of
-      // that response body. Routing lets us fetch the real response and
-      // read its body ourselves, deterministically, before handing it back
-      // to the page via route.fulfill() so the app still behaves normally.
+      // 1. Select a valid WEBP image. Intercepts via page.route(), since a
+      // plain waitForResponse().then(r => r.text()) here intermittently throws (see CLAUDE.md).
       let responseStatus = 0;
       let responseBody = '';
       await page.route('**/company', async (route) => {
@@ -622,49 +383,18 @@ test.describe('Logo Upload', () => {
       await expect.poll(() => responseStatus).toBe(200);
       await page.unroute('**/company');
 
-      // CORRECTION to the live-verified plan, found while automating this
-      // exact scenario: the plan states that NO network request at all is
-      // sent for a WEBP selection. Careful, repeated live re-verification
-      // here (inspecting the real fetch call and its response body, not
-      // just a network-tab glance, and cross-checked against an unrelated
-      // click to rule out coincidental background traffic) shows this part
-      // of the plan is not accurate - a real POST /company request IS sent
-      // and DOES receive a real 200 OK response, whose body is a Next.js
-      // RSC-streamed payload containing
-      // {"ok":false,"message":"Validation failed (current file type is
-      // image/webp, expected type is image/(jpeg|png))"} - i.e. the backend
-      // correctly identifies and rejects the WEBP file with a clear,
-      // specific validation message. The real bug is therefore one level
-      // "closer to the surface" than the plan describes: the frontend DOES
-      // receive this explicit rejection from the backend, but completely
-      // fails to surface it to the user in any way (no error dialog reusing
-      // the generic modal from 3.1-3.3, no toast, nothing) - unlike every
-      // other rejected-file case in this section, which all funnel into
-      // that same visible generic dialog. The end-user-visible outcome
-      // (total silence) matches the plan's headline finding exactly; only
-      // the underlying network-level mechanism differs from what was
-      // documented.
+      // CORRECTED: the plan claimed no request is sent for WEBP - a real
+      // POST returns 200 with a body explicitly rejecting it. The bug is
+      // closer to the surface: the frontend gets this rejection but never surfaces it (no dialog/toast at all).
       expect(responseStatus).toBe(200);
       expect(responseBody).toContain('"ok":false');
       expect(responseBody).toContain('image/webp');
 
-      // No error dialog of any kind appears (unlike every other
-      // rejected-file case in section 3.3, which all show the generic
-      // 150x150/500KB dialog).
       await expect(logoErrorDialogHeading(page)).not.toBeVisible();
-
-      // No success toast appears either.
       await expect(page.locator('text=Your logo was uploaded successfully')).not.toBeVisible();
-
-      // The Logo Upload card's displayed image is completely unchanged,
-      // still showing whichever logo was previously saved.
       await expect(cardImage).toHaveAttribute('src', previousSrc!);
 
-      // A real user selecting a modern, common, perfectly valid WEBP logo
-      // image receives absolutely no indication that anything happened at
-      // all - no confirmation of success, no explanation of failure,
-      // nothing - despite the backend having explicitly told the frontend
-      // why the file was rejected.
+      // A real user gets zero indication anything happened, despite the backend explicitly explaining why it was rejected.
       await page.goto(`${BASE_URL}/company`);
       await expect(cardImage).toHaveAttribute('src', previousSrc!);
     });
@@ -674,36 +404,19 @@ test.describe('Logo Upload', () => {
     test("4.1 Neither Escape nor clicking the backdrop closes the size/dimension error dialog — only the explicit 'Continue' button does", async ({ page }) => {
       const dialogHeading = logoErrorDialogHeading(page);
 
-      // 1. Trigger the generic error dialog (e.g. by selecting an oversized
-      // or undersized file per section 3), then press the Escape key.
+      // 1. Trigger the error dialog, then press Escape - stays open, same pattern as the Change Password modal.
       await injectNoisyLogoImageFile(page, { width: 1600, height: 1600, fileName: 'escape-test-oversized.png' });
       await expect(dialogHeading).toBeVisible();
       await expect(page.getByText(LOGO_ERROR_MESSAGE)).toBeVisible();
-
       await page.keyboard.press('Escape');
-
-      // Live-verified: the dialog remains fully open - Escape does NOT
-      // close it, matching the same pattern already documented for the
-      // Change Password modal on /profile.
       await expect(dialogHeading).toBeVisible();
 
-      // 2. With the dialog still open, click directly on the dialog's
-      // backdrop (the dimmed overlay area outside the dialog box, e.g. via
-      // the underlying `.MuiBackdrop-root` element) at a point not covered
-      // by the centered dialog itself.
+      // 2. Click the backdrop directly - also does not close it.
       await page.locator('.MuiBackdrop-root').click({ position: { x: 5, y: 5 } });
-
-      // Live-verified: the dialog remains fully open - clicking the
-      // backdrop does NOT close it either.
       await expect(dialogHeading).toBeVisible();
 
-      // 3. Click the explicit 'Continue' button.
+      // 3. Click 'Continue' - the one reliable way to dismiss it.
       await page.getByRole('button', { name: 'Continue' }).click();
-
-      // The dialog closes cleanly, confirming 'Continue' is the one
-      // reliable way to dismiss this dialog, consistent with the equivalent
-      // Escape/backdrop-immune behavior already documented for the Change
-      // Password modal.
       await expect(dialogHeading).not.toBeVisible();
     });
   });

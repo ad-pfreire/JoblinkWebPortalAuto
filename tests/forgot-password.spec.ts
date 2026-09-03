@@ -6,29 +6,12 @@ import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount
 const BASE_URL = requireEnv('BASE_URL');
 const REGISTERED_EMAIL = `${requireEnv('TEST_EMAIL_USER')}+automation${requireEnv('TEST_EMAIL_DOMAIN')}`;
 const INVALID_EMAIL = 'invalid-email';
-// A syntactically valid but never-registered address (same style of example
-// the test plan verifies behaves identically to a registered one — see
-// specs/forgot-password-test-plan.md section 2.4). Used for the
-// reset-password page tests below so they don't depend on, or interfere
-// with, the real REGISTERED_EMAIL inbox. Generated fresh per call (rather
-// than a single shared literal) so no two calls, even across parallel
-// workers, ever submit the exact same address.
+/** A fresh, never-registered address per call, so reset-password tests never depend on or collide with REGISTERED_EMAIL's inbox. */
 function generateUnregisteredEmail() {
   return `noexiste-qa-test-${Date.now().toString(36)}${Math.floor(Math.random() * 10000)}@crifa.com`;
 }
 
-// Clicks the forgot-password form's Continue button and waits for the
-// redirect to /reset-password. Confirmed live and in isolated, fully serial
-// CI runs (no concurrency involved at all) that this submission itself —
-// not just the resulting email's delivery — is intermittently unreliable on
-// the real pre-staging backend right now: it can hang on /forgot-password
-// for several consecutive attempts, then succeed instantly moments later
-// with nothing changed on the test side. That's consistent with the same
-// backend email-sending pipeline behind the already-known email-delivery
-// slowness (getVerificationLink/getPasswordResetCode), since submitting
-// this form is presumably what triggers that pipeline. Every test that
-// calls this (directly or via goToResetPassword) is tagged @real-email in
-// CI for that reason, even the ones that never read an email themselves.
+/** Clicks Continue and waits for the redirect to /reset-password - the submission itself, not just the email, is intermittently slow on the real backend. */
 async function submitForgotPasswordAndExpectResetPassword(page: Page) {
   await page.locator('button[type="submit"]').click();
   await expect(page).toHaveURL(/.*\/reset-password$/, { timeout: 20_000 });
@@ -128,13 +111,8 @@ test.describe('Forgot Password flow', () => {
     // 1. Open the forgot password page.
     await page.goto(`${BASE_URL}/forgot-password`);
 
-    // 2. Enter an email in mixed uppercase/lowercase. A fresh unregistered
-    // address rather than REGISTERED_EMAIL.toUpperCase(), so this never
-    // repeats an address another test in this file already submitted — per
-    // section 2.4/2.5 of the test plan, unregistered and registered emails
-    // already behave identically at this endpoint, so this still exercises
-    // the real behavior being tested (mixed-case input reaching
-    // reset-password).
+    // 2. Enter a fresh unregistered email in mixed case - unregistered and
+    // registered addresses behave identically here, so this still exercises the real mixed-case behavior.
     const emailInput = page.locator('input[name="username"]');
     const continueButton = page.locator('button[type="submit"]');
     await emailInput.click();
@@ -254,11 +232,7 @@ test.describe('Reset Password page - additional behaviors', () => {
   });
 });
 
-// These two suites mutate real backend state (a real password change, a real
-// account deletion) and each register their own disposable, run-unique
-// account first — never the shared seed account
-// (pfautomation / paul.freire+automation@crifa.com) that every other test
-// file here depends on.
+// These two suites mutate real backend state, each registering their own disposable account first - never the shared seed account.
 test.describe('Full end-to-end password reset (real email, real code)', () => {
   test.describe.configure({ retries: 1 });
 

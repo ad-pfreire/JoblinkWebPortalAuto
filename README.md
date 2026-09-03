@@ -94,24 +94,34 @@ npx playwright test --grep-invert @real-email
 
 ```
 tests/
-  login-cases.spec.ts           Login page: valid/invalid login, validation, visibility toggle, etc.
-  account-registration.spec.ts  Registration, email verification, Complete Profile
-  forgot-password.spec.ts       Forgot/reset password, account deletion
-  profile-settings.spec.ts      Profile page: name/phone edit, photo upload, Change Password, delete-cancel
-  logo-upload.spec.ts           Company page Logo Upload card: valid upload/replace, size/dimension validation, error dialog behavior
-  company-details.spec.ts       Company page Company Details card: read view, edit form, validation, save/persistence, cancel/discard
+  login-cases.spec.ts                Login page: valid/invalid login, validation, visibility toggle, etc.
+  account-registration.spec.ts       Registration, email verification, Complete Profile
+  forgot-password.spec.ts            Forgot/reset password, account deletion
+  profile-settings.spec.ts           Profile page: name/phone edit, photo upload, Change Password, delete-cancel
+  logo-upload.spec.ts                Company page Logo Upload card: valid upload/replace, size/dimension validation, error dialog behavior
+  company-details.spec.ts            Company page Company Details card: read view, edit form, validation, save/persistence, cancel/discard
+  payments.spec.ts                   /payments: Stripe-hosted Billing Address + Card form, save/decline/3D Secure flows, replace/delete
+  subscription.spec.ts               /subscription: plan selection, real Stripe Checkout purchase, in-app upgrade/downgrade, cancel/resume
+  teams.spec.ts                      /teams: default team, create/rename/delete, invite member (real email), global search
+  teams-plan-gating.spec.ts          Plan-tier gating after a real Stripe Test Clock time-lapse, cross-checked against MongoDB
+  account-deletion-billing.spec.ts   Account deletion's cascade into a real Stripe subscription and MongoDB
+  payment-history.spec.ts            Company page Payment History table: pagination, sorting (known bug), Stripe/PDF cross-checks
+  seed.spec.ts                       Empty scratch file for one-off manual experiments — not part of the suite
   utils/
-    env.ts                      requireEnv() — fails fast with a clear message if .env is missing a value
-    account.ts                  Shared account lifecycle helpers (register, complete profile) reused across spec files
-    email.ts                    Reads real verification links / reset codes over IMAP
+    env.ts                           requireEnv() — fails fast with a clear message if .env is missing a value
+    account.ts                       Shared account lifecycle helpers (register, complete profile) reused across spec files
+    email.ts                         Reads real verification links / reset codes over IMAP
+    stripe.ts                        Plain-fetch() helpers for read-only/test-mode calls against the real Stripe REST API
+    mongo.ts                         Read-only helpers for the pre-staging MongoDB (see "Read-only MongoDB access" in CLAUDE.md)
 .github/workflows/
-  playwright.yml                CI: runs the suite on push/PR to main (see "CI" below)
-  copilot-setup-steps.yml       Environment setup steps for GitHub Copilot coding agent
-.claude/agents/, .github/agents/
-  playwright-test-planner       Explores the live app and writes a specs/*.md test plan
-  playwright-test-generator     Turns a plan item into a Playwright spec file
-  playwright-test-healer        Debugs and fixes failing Playwright tests
-playwright.config.ts            Runs on chromium, firefox, and webkit
+  playwright.yml                     CI: runs the suite on push/PR to main (see "CI" below)
+  copilot-setup-steps.yml            Environment setup steps for GitHub Copilot coding agent
+.claude/agents/
+  playwright-test-planner            Explores the live app and writes a specs/*.md test plan
+  playwright-test-generator          Turns a plan item into a Playwright spec file
+  playwright-test-healer             Debugs and fixes failing Playwright tests
+playwright.config.ts                 chromium/firefox/webkit, plus 4 dedicated Chromium-only projects (subscription,
+                                      teams-plan-gating, account-deletion-billing, payment-history) needing CI-only launch flags
 ```
 
 ## Test plans (`specs/`)

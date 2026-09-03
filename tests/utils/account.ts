@@ -6,19 +6,17 @@ const BASE_EMAIL = requireEnv('TEST_EMAIL_USER');
 const EMAIL_DOMAIN = requireEnv('TEST_EMAIL_DOMAIN');
 export const TEST_ALIAS_PREFIX = 'autotest';
 
+/** Builds a plus-addressed alias under the shared test mailbox. */
 export function generateEmailAlias(suffix: string) {
   return `${BASE_EMAIL}+${suffix}${EMAIL_DOMAIN}`;
 }
 
-// Generates a suffix that is unique per test run (and per parallel browser
-// project), so repeated CI runs never collide with a previously-registered
-// email in the real pre-staging backend (Cognito rejects re-registering the same
-// username/email with "User already exists"). The app also enforces a hard
-// 20 character max length on the username field, and the derived username is
-// `${BASE_EMAIL without dots}${suffix}` (10 chars for "paulfreire"), so the
-// suffix itself must stay at or under 10 characters. We use 2 chars from
-// TEST_ALIAS_PREFIX plus a base36 timestamp/random token to stay unique
-// while respecting that budget.
+/**
+ * Generates a unique email alias for this test run, avoiding collisions
+ * with previously registered emails.
+ *
+ * @returns A unique email alias, ready to use with `registerNewAccount`.
+ */
 export function generateUniqueEmailAlias() {
   const timePart = Date.now().toString(36).slice(-6); // 6 chars, cycles every ~25 days
   const randomPart = Math.floor(Math.random() * 1296).toString(36).padStart(2, '0'); // 2 chars
@@ -26,6 +24,11 @@ export function generateUniqueEmailAlias() {
   return generateEmailAlias(uniqueToken);
 }
 
+/**
+ * Derives a Cognito username from an email alias, normalizing dots/plus signs.
+ *
+ * @returns The username, prefixed with the base account's username if needed.
+ */
 export function generateUsernameFromEmail(email: string) {
   const baseUsername = BASE_EMAIL.replace(/\./g, '');
   const localPart = email.split('@')[0];
@@ -33,6 +36,13 @@ export function generateUsernameFromEmail(email: string) {
   return normalized.startsWith(baseUsername) ? normalized : `${baseUsername}${normalized}`;
 }
 
+/**
+ * Registers a new account through the public /register form.
+ *
+ * @param page - Playwright page, not yet logged in.
+ * @param emailAlias - Email to register; should be unique per run.
+ * @returns Nothing; leaves `page` on the /email-verification screen.
+ */
 export async function registerNewAccount(page: Page, emailAlias: string) {
   const username = generateUsernameFromEmail(emailAlias);
   const password = requireEnv('TEST_REGISTER_PASSWORD');
@@ -47,26 +57,18 @@ export async function registerNewAccount(page: Page, emailAlias: string) {
   await expect(page.locator('button[type="submit"]')).toBeEnabled();
   await page.click('button[type="submit"]');
 
-  // The real pre-staging Cognito signup call can take longer than the default
-  // 5s under concurrent load (e.g. all 3 browser projects registering at
-  // once), so this redirect gets a more generous timeout.
   await expect(page).toHaveURL(/.*\/email-verification$/, { timeout: 15_000 });
   await expect(page.locator('text=Job Link Email Verification')).toBeVisible();
   await expect(page.locator('text=We send you a verification email')).toBeVisible();
 }
 
-// Selects a country in the phone widget by clicking the option's text
-// content directly. The country dropdown renders a hidden native <select>
-// alongside the visible popper list for accessibility, and
-// getByRole('option', ...) can resolve to the hidden duplicate instead of
-// the real one, silently failing to change the country. The combobox is
-// scoped to the phone input's own container (not page-wide .first()) so it
-// keeps resolving to the right element even if the page re-renders and adds
-// other comboboxes earlier in the DOM.
-//
-// Exported so other spec files (e.g. profile-settings.spec.ts) driving the
-// same underlying phone-widget component elsewhere in the app can reuse this
-// exact workaround instead of duplicating it.
+/**
+ * Selects a country in the phone widget by clicking the option's visible text.
+ *
+ * The widget renders a hidden native `<select>` alongside the real popper
+ * list; `getByRole('option')` can resolve to the hidden one, so this clicks
+ * by text content instead, scoped to this phone input's own container.
+ */
 export async function selectPhoneCountry(page: Page, phoneInput: Locator, countryName: string) {
   const countryCombobox = phoneInput.locator('xpath=..').getByRole('combobox');
   await countryCombobox.click();
@@ -78,16 +80,12 @@ export async function selectPhoneCountry(page: Page, phoneInput: Locator, countr
   }, countryName);
 }
 
-// Resets the phone field to a clean "+<dial code>" state and types fresh
-// digits. Re-selecting the SAME country is a no-op in MUI (onChange doesn't
-// fire when the value doesn't change) and backspacing the stale digits still
-// leaves the widget in a state where the next keystroke re-triggers its
-// auto-country-detect-from-digits parsing instead of respecting the already
-// selected country. Switching to a different country first forces a real
-// onChange that actually resets the field, then switching back to the
-// target country is itself a real change too, guaranteeing a clean start.
-//
-// Exported for the same reason as selectPhoneCountry() above.
+/**
+ * Resets the phone field and types a fresh number for the given country.
+ *
+ * Re-selecting the same country is a no-op in MUI, so this switches to a
+ * throwaway country first to force a real reset before selecting the target.
+ */
 export async function setPhoneNumber(page: Page, phoneInput: Locator, countryName: string, digits: string) {
   await selectPhoneCountry(page, phoneInput, 'Mexico');
   await selectPhoneCountry(page, phoneInput, countryName);
@@ -95,11 +93,10 @@ export async function setPhoneNumber(page: Page, phoneInput: Locator, countryNam
   await phoneInput.pressSequentially(digits);
 }
 
-// Fills the "Complete Profile" step that a brand-new account is routed to
-// right after its first login. First probes the required-field and
-// phone-format validation messages, then fills everything correctly and
-// submits. All values are arbitrary placeholders except the phone number,
-// which the app validates as a real dialable number.
+/**
+ * Completes the "Complete Profile" step a new account is routed to after
+ * first login: probes validation, then fills every field and submits.
+ */
 export async function completeProfile(page: Page) {
   const firstNameInput = page.locator('input[name="firstName"]');
   const lastNameInput = page.locator('input[name="lastName"]');

@@ -100,10 +100,7 @@ test.describe('Login flow', () => {
       // 2. Log in.
       await loginButton.click();
 
-      // 3. Verify that login succeeded (redirects and shows company data).
-      // The app now also renders a hidden dialog whose title is "Company
-      // Details", which makes that text ambiguous — the selected "Company"
-      // tab is a stable, unambiguous signal that the page loaded correctly.
+      // 3. Redirects and shows the selected 'Company' tab (a hidden dialog also shares the "Company Details" text).
       await expect(page).toHaveURL(/.*\/(company|teams\/list)$/);
       await expect(page.getByRole('tab', { name: 'Company', selected: true })).toBeVisible();
     });

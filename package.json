@@ -12,7 +12,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "Automated Playwright QA suite for the Job Link web portal (login, account registration, and password recovery flows).",
+  "description": "Automated Playwright QA suite for the Job Link web portal — login, registration, profile settings, company details, logo upload, payments, subscription, and teams.",
   "devDependencies": {
     "@playwright/test": "^1.62.0",
     "@types/mailparser": "^3.4.6",

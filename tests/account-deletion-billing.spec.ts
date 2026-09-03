@@ -13,14 +13,7 @@ const STRIPE_KEY = requireEnv('STRIPE_TEST_RESTRICTED_KEY');
 const STRIPE_API = 'https://api.stripe.com/v1';
 const MONGO_URI = requireEnv('MONGODB_PRESTAGING_URI');
 
-// This file's CI-only Chromium software-rendering flags (same GPU/hCaptcha
-// gotcha documented in CLAUDE.md for subscription.spec.ts/
-// teams-plan-gating.spec.ts - this file does several real Stripe Checkout
-// purchases across its suites). Lives in this file's own dedicated
-// `chromium-account-deletion-billing` project in playwright.config.ts, NOT
-// as a file-level test.use({ launchOptions }) here - see that project's own
-// comment for why (a file-level test.use() would apply to every project
-// that attempts this file, crashing webkit/firefox outright).
+// This file's CI-only Chromium software-rendering flags (see CLAUDE.md) live in its own dedicated project in playwright.config.ts, not a file-level test.use() here.
 
 // --- Stripe REST API helpers (same pattern as teams-plan-gating.spec.ts) ---
 async function stripeRequest(method: 'GET' | 'POST', path: string, body?: Record<string, string>) {
@@ -92,12 +85,7 @@ async function attachClockAndAdvancePastPeriodEnd(customerId: string, currentPer
   await pollTestClockUntilReady(clock.id, 180_000);
 }
 
-// --- MongoDB read-only helpers ---
-//
-// HARD RULE, no exceptions (see CLAUDE.md): this connection is a shared
-// credential approved for READ-ONLY use. Every function below only ever
-// calls find()/findOne() - never write anything here or anywhere else in
-// this file.
+// --- MongoDB read-only helpers --- HARD RULE (see CLAUDE.md): read-only credential, only find()/findOne(), never write.
 async function withMongo<T>(fn: (db: import('mongodb').Db) => Promise<T>): Promise<T> {
   const client = new MongoClient(MONGO_URI);
   try {
@@ -248,10 +236,7 @@ async function deleteAccountViaUI(page: Page) {
   await expect(page).toHaveURL(`${BASE_URL}/login`, { timeout: 15_000 });
 }
 
-// Invites `memberEmail` from the currently logged-in (owner) page, then
-// switches to a separate browser context to accept as that member - same
-// isolation technique teams.spec.ts test 6.7 already uses so the owner's
-// own session is never disturbed.
+/** Invites `memberEmail` from the owner's page, then accepts it in a separate context so the owner's own session is undisturbed. */
 async function inviteAndAcceptMember(ownerPage: Page, browser: import('@playwright/test').Browser, memberEmail: string, memberUsername: string) {
   await ownerPage.goto(`${BASE_URL}/teams/members`);
   await ownerPage.getByRole('button', { name: 'Invite Member' }).click();
@@ -275,11 +260,7 @@ async function inviteAndAcceptMember(ownerPage: Page, browser: import('@playwrig
   await memberContext.close();
 }
 
-// Adds an already-active company member to "My Team" specifically, via the
-// team detail page's own "+ Add Members" panel - reuses teams.spec.ts test
-// 2.3's already-proven selectors (this panel's combobox is named 'Add team
-// members' and its submit button 'Save', NOT the company-wide invite
-// modal's 'Add People by Email' / 'Invite').
+/** Adds an active company member to "My Team" via its own "+ Add Members" panel (distinct combobox/button from the company-wide invite modal). */
 async function addMemberToMyTeam(page: Page, memberEmail: string) {
   await page.goto(`${BASE_URL}/teams/list`);
   await page.getByRole('button', { name: /My Team/ }).click();
@@ -305,26 +286,17 @@ test.describe('Account Deletion & Billing', () => {
     let stripeCustomerId: string;
     let stripeSubscriptionId: string;
 
-    // This setup does a lot of real, slow work: two registrations + two
-    // real emails + a real Stripe Checkout purchase + a real invitation
-    // email + accepting it + adding the member to a specific team. Budget
-    // matches teams-plan-gating.spec.ts's own beforeAll reasoning for the
-        // same class of real-email + real-Stripe setup.
+    // Two registrations + two real emails + a real Stripe purchase + an
+    // invitation + adding the member to a team - generous budget, same class of setup as teams-plan-gating.spec.ts.
     test.beforeAll(async ({ browser, browserName }) => {
-      // See subscription.spec.ts/teams-plan-gating.spec.ts's identical
-      // guard for why this is needed on beforeAll itself, not just inside
-      // beforeEach below.
+      // Guarded here too, not just beforeEach - a beforeEach skip doesn't gate beforeAll (see CLAUDE.md).
       test.skip(
         browserName !== 'chromium',
         'Disposable multi-account state built up sequentially across this describe block; runs once serially on chromium to avoid cross-project races and redundant registrations.'
       );
       test.setTimeout(960_000);
 
-      // browser.newPage() alone drops this project's configured
-      // devices['Desktop Chrome'] context options (notably the user
-      // agent), which live-verified elsewhere in this project can make a
-      // real verification email never arrive within budget - see
-      // CLAUDE.md.
+      // newContext() with the device profile, not bare newPage() - see CLAUDE.md's real-email delivery gotcha.
       const ownerContext = await browser.newContext({ ...devices['Desktop Chrome'] });
       const ownerPage = await ownerContext.newPage();
       const owner = await registerFullAccount(ownerPage);
@@ -336,11 +308,7 @@ test.describe('Account Deletion & Billing', () => {
       memberUsername = member.username;
       await memberContext.close();
 
-      // Owner purchases Job Link Pro (Monthly) via a real Stripe Checkout
-      // round trip - reusing the pattern subscription.spec.ts test 4.2 /
-      // teams-plan-gating.spec.ts already proved reliable. Deliberately
-      // does NOT cancel it afterward - Suite 3 below needs a genuinely
-      // still-ACTIVE subscription at deletion time.
+      // Purchases Job Link Pro (Monthly) via real Stripe Checkout, deliberately not cancelled - Suite 3 needs it still ACTIVE.
       await ownerPage.goto(`${BASE_URL}/subscription`);
       await selectPlanAndContinue(ownerPage, 'Job Link Pro');
       await purchaseViaCheckout(ownerPage, 'QA Account Deletion Billing');
@@ -358,9 +326,7 @@ test.describe('Account Deletion & Billing', () => {
         throw new Error(`Expected owner's own tier to be "pro" immediately after purchase, got "${ownerTier}". Aborting - every test below assumes a genuinely active paid subscription.`);
       }
 
-      // Connect the member: invite + accept (company-wide), then also add
-      // to "My Team" specifically (team-level) - both connection points
-      // this plan's Suite 5 tests need to already be true.
+      // Connects the member at both levels Suite 5 needs: company-wide invite/accept, and team-level.
       await inviteAndAcceptMember(ownerPage, browser, member.email, member.username);
       await addMemberToMyTeam(ownerPage, member.email);
 
@@ -386,16 +352,12 @@ test.describe('Account Deletion & Billing', () => {
       await loginAs(page, ownerUsername);
       await deleteAccountViaUI(page);
 
-      // 3. Live-verified REAL FINDING: the subscription is genuinely,
-      // immediately canceled - not merely scheduled for period end. The
-      // person is not left being billed for a service they can no longer
-      // access.
+      // 3. REAL FINDING: genuinely, immediately canceled - not merely scheduled for period end.
       const after = await stripeRequest('GET', `/subscriptions/${stripeSubscriptionId}`);
       expect(after.status).toBe('canceled');
       expect(after.canceled_at).not.toBeNull();
 
-      // 4. Live-verified REAL FINDING: the Stripe Customer object itself is
-      // also removed, not just its subscription.
+      // 4. REAL FINDING: the Stripe Customer object itself is removed, not just its subscription.
       const customerAfter = await stripeRequest('GET', `/customers/${stripeCustomerId}`);
       expect(customerAfter.deleted).toBe(true);
     });
@@ -407,29 +369,21 @@ test.describe('Account Deletion & Billing', () => {
       // 1. A real, hard delete - not a soft "inactive" flag.
       expect(orphanCheck.usersDocStillExists).toBe(false);
 
-      // 2. Live-verified REAL FINDING: zero account_memberships rows
-      // reference the old owner id in EITHER direction - this correctly
-      // includes not just the owner's own self-row, but also the MEMBER's
-      // delegated row (account_id = the now-deleted owner's id).
+      // 2. REAL FINDING: zero account_memberships rows reference the old
+      // owner id in EITHER direction - including the MEMBER's own delegated row.
       expect(orphanCheck.memberships).toHaveLength(0);
 
-      // 3. tier_subscription_view is a derived view of account_memberships
-      // - consistent with step 2.
+      // 3. tier_subscription_view is a derived view of account_memberships - consistent with step 2.
       expect(orphanCheck.tierViews).toHaveLength(0);
 
-      // 4. "My Team" itself is gone, and so is the member's own
-      // team_memberships row within it.
+      // 4. "My Team" and the member's own row within it are both gone.
       expect(orphanCheck.teams).toHaveLength(0);
       expect(orphanCheck.teamMemberships).toHaveLength(0);
 
-      // 5. The legacy subscriptions collection was never written to for
-      // this account in the first place (live-verified before AND after
-      // the real purchase) - directly addressing the pre-investigation
-      // concern about a possible leftover record here.
+      // 5. The legacy subscriptions collection was never written to for this account, before or after the purchase.
       expect(orphanCheck.subscriptionsLegacy).toHaveLength(0);
 
-      // 6. The (already-accepted, and therefore already-consumed)
-      // invitation record does not linger either.
+      // 6. The already-consumed invitation record doesn't linger either.
       expect(orphanCheck.invitationsSent).toHaveLength(0);
     });
 
@@ -451,15 +405,9 @@ test.describe('Account Deletion & Billing', () => {
   });
 
   test.describe('Re-Registration After Deletion: An Informational Probe, Not a Pass/Fail Assertion', () => {
-    // See finding 2 in specs/account-deletion-billing-test-plan.md: the
-    // first version of this investigation found "User already exists" on
-    // re-registering with a just-deleted account's exact email+username,
-    // but 6 further deliberate reproduction attempts (including an exact
-    // replica of the original failing conditions) all succeeded instead.
-    // With 7 total real deletions and only 1 failure, this is NOT a safe
-    // basis for a hard pass/fail assertion in either direction - this test
-    // logs the real outcome without failing the suite either way, so a
-    // genuine shift in frequency would still become visible over time.
+    // Of 7 real deletions tried, re-registering with the same email+username
+    // succeeded 6 times and failed once ("User already exists") - too
+    // inconsistent for a hard pass/fail assertion, so this logs the outcome instead of asserting on it.
     test("6.1 Attempting to re-register with the exact same email and username as a just-deleted account is logged, not asserted on @real-email", async ({
       page,
       browserName,
@@ -473,10 +421,7 @@ test.describe('Account Deletion & Billing', () => {
       // 2. Delete it for real.
       await deleteAccountViaUI(page);
 
-      // 3. Attempt to register again with the IDENTICAL email and
-      // username, and record whichever real outcome actually happens -
-      // deliberately no hard assertion here (see the describe block's own
-      // comment above).
+      // 3. Register again with the IDENTICAL email/username and record the outcome (no hard assertion, see above).
       await page.goto(`${BASE_URL}/register`);
       await page.fill('input[name="email"]', email);
       await page.fill('input[name="username"]', username);
@@ -516,24 +461,19 @@ test.describe('Account Deletion & Billing', () => {
       const customerId = await stripeFindCustomerByEmail(email);
       const sub = await stripeFindSubscription(customerId);
 
-      // expect: scheduled but not yet lapsed - status still "active",
-      // cancel_at_period_end true. canceled_at is ALSO already set at this
-      // point (live-verified) - worth asserting explicitly since it's easy
-      // to misread as a contradiction if not checked directly like this.
+      // Scheduled but not lapsed: status still "active", cancel_at_period_end
+      // true, and canceled_at already set (worth checking explicitly - easy to misread as a contradiction otherwise).
       const before = await stripeRequest('GET', `/subscriptions/${sub.id}`);
       expect(before.status).toBe('active');
       expect(before.cancel_at_period_end).toBe(true);
       expect(before.canceled_at).not.toBeNull();
 
-      // 2. Delete the account for real while still in this scheduled
-      // state.
+      // 2. Delete while still in this scheduled state.
       await deleteAccountViaUI(page);
 
-      // 3. Live-verified REAL FINDING: deletion force-finalizes the
-      // already-scheduled cancellation immediately, rather than leaving it
-      // pending until the original period end - status flips straight to
-      // "canceled", cancel_at_period_end resets to false, and canceled_at
-      // stays at the SAME timestamp captured in step 1 (not a new one).
+      // 3. REAL FINDING: deletion force-finalizes the scheduled cancellation
+      // immediately - status flips to "canceled", cancel_at_period_end
+      // resets to false, canceled_at stays the SAME timestamp from step 1.
       const after = await stripeRequest('GET', `/subscriptions/${sub.id}`);
       expect(after.status).toBe('canceled');
       expect(after.cancel_at_period_end).toBe(false);
@@ -552,9 +492,7 @@ test.describe('Account Deletion & Billing', () => {
       test.setTimeout(960_000);
 
       // 1. Register, purchase, schedule a cancellation, then drive a real
-      // Stripe Test Clock past the period end so the subscription
-      // genuinely lapses - reuses teams-plan-gating.spec.ts's exact
-      // pattern.
+      // Test Clock past the period end so it genuinely lapses (same pattern as teams-plan-gating.spec.ts).
       const { email, username } = await registerFullAccount(page);
       await page.goto(`${BASE_URL}/subscription`);
       await selectPlanAndContinue(page, 'Job Link Pro');
@@ -630,10 +568,8 @@ test.describe('Account Deletion & Billing', () => {
       test.skip(browserName !== 'chromium', 'Two real registrations + an invitation email + a deletion; runs once to avoid tripling load on the real email pipeline.');
       test.setTimeout(600_000);
 
-      // 1. Register a fresh owner and a fresh member; owner invites
-      // member, member accepts. This owner does NOT need a real purchase -
-      // this suite is about the member/owner connection's cleanup, not
-      // billing (already covered by Suites 3/4/8 above).
+      // 1. Register owner and member, invite/accept. No real purchase needed
+      // - this suite is about connection cleanup, not billing (Suites 3/4/8 already cover that).
       const ownerContext = await browser.newContext({ ...devices['Desktop Chrome'] });
       const ownerPage = await ownerContext.newPage();
       const owner = await registerFullAccount(ownerPage);
@@ -660,20 +596,15 @@ test.describe('Account Deletion & Billing', () => {
 
       await ownerContext.close();
 
-      // 2. Log in as the MEMBER (not the owner) and delete THEIR OWN
-      // account. The member's original page/context was already closed
-      // right after registering (step 1), so this uses a fresh one - the
-      // same pattern already used for the owner's final check in step 5.
+      // 2. Log in as the MEMBER and delete their own account - a fresh context, since the original was closed after step 1.
       const finalMemberContext = await browser.newContext({ ...devices['Desktop Chrome'] });
       const finalMemberPage = await finalMemberContext.newPage();
       await loginAs(finalMemberPage, member.username);
       await deleteAccountViaUI(finalMemberPage);
       await finalMemberContext.close();
 
-      // 3. Live-verified REAL FINDING: the owner's own data is
-      // byte-for-byte unchanged - identical _id and timestamps to before
-      // the member's self-deletion - only the member's own delegated row is
-      // gone, dropping the count from 2 back to 1.
+      // 3. REAL FINDING: the owner's own data is byte-for-byte unchanged -
+      // only the member's delegated row is gone, dropping the count from 2 to 1.
       const after = await getOwnedMongoSnapshot(ownerMongoId);
       expect(after.memberships).toHaveLength(1);
       expect(after.memberships[0]).toEqual(ownerSelfRowBefore);

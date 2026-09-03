@@ -3,11 +3,11 @@ import { requireEnv } from './env';
 const STRIPE_KEY = requireEnv('STRIPE_TEST_RESTRICTED_KEY');
 const STRIPE_API = 'https://api.stripe.com/v1';
 
-// Same pattern already proven in teams-plan-gating.spec.ts and
-// account-deletion-billing.spec.ts, extracted here so a third/fourth
-// consumer (payments.spec.ts, subscription.spec.ts) doesn't need its own
-// copy. Read-only or test-mode-only calls throughout this project - see
-// CLAUDE.md's "Stripe restricted key" section for this key's exact scope.
+/**
+ * Signs and sends a request to the Stripe REST API using the restricted test key.
+ *
+ * @throws If Stripe returns a non-2xx response.
+ */
 export async function stripeRequest(method: 'GET' | 'POST', path: string, body?: Record<string, string>) {
   const headers: Record<string, string> = {
     Authorization: `Basic ${Buffer.from(`${STRIPE_KEY}:`).toString('base64')}`,
@@ -25,6 +25,11 @@ export async function stripeRequest(method: 'GET' | 'POST', path: string, body?:
   return json;
 }
 
+/**
+ * Finds a Stripe customer by email.
+ *
+ * @throws If no customer is found.
+ */
 export async function stripeFindCustomerByEmail(email: string): Promise<string> {
   const result = await stripeRequest('GET', `/customers?email=${encodeURIComponent(email)}&limit=1`);
   if (!result.data?.length) {
@@ -33,11 +38,17 @@ export async function stripeFindCustomerByEmail(email: string): Promise<string> 
   return result.data[0].id;
 }
 
+/** Lists a customer's saved card payment methods. */
 export async function stripeListCardPaymentMethods(customerId: string): Promise<Array<{ id: string; card: { last4: string } }>> {
   const result = await stripeRequest('GET', `/payment_methods?customer=${customerId}&type=card&limit=100`);
   return result.data ?? [];
 }
 
+/**
+ * Finds a customer's most recent subscription, in any status.
+ *
+ * @throws If no subscription is found.
+ */
 export async function stripeFindSubscription(customerId: string): Promise<{ id: string; cancelAtPeriodEnd: boolean }> {
   const result = await stripeRequest('GET', `/subscriptions?customer=${customerId}&status=all&limit=1`);
   if (!result.data?.length) {

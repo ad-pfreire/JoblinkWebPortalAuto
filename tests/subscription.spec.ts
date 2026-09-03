@@ -13,10 +13,7 @@ let disposableUsername: string;
 let disposablePassword: string;
 let disposableEmail: string;
 
-// Logs in with the one disposable account registered once in beforeAll below
-// and lands on /company - the default first tab after login. Mirrors
-// loginAsDisposableAndGoToCompany() in payments.spec.ts, just against this
-// file's own dedicated Subscription account instead of Payments'.
+/** Logs in with the disposable account from `beforeAll` and lands on /company. */
 async function loginAsDisposableAndGoToCompany(page: Page) {
   await page.goto(`${BASE_URL}/login`);
   await page.locator('input[name="username"]').fill(disposableUsername);
@@ -26,20 +23,10 @@ async function loginAsDisposableAndGoToCompany(page: Page) {
   await page.goto(`${BASE_URL}/company`);
 }
 
-// --- Stripe iframe helpers, duplicated from tests/payments.spec.ts ---
-//
-// This project's established convention (see payments.spec.ts's own
-// identical comment) is to duplicate these per spec file rather than share
-// them via tests/utils/, matching how other per-file helpers in this
-// project are handled. Needed here because Suite 7's "Resume Subscription"
-// dialog reuses the EXACT SAME embedded Stripe Elements Billing
-// Address/Card component as /payments' own form (live-verified in
-// specs/subscription-test-plan.md finding 19) - so the same iframe-mounting
-// races, the same "more than one iframe can share the same title"
-// ambiguity, and the same fill()-vs-real-keystrokes gotcha all apply here
-// too. See payments.spec.ts's own extensive comments on
-// resolveStripeFrameByContent() for the full, live-verified reasoning this
-// duplicates verbatim.
+// --- Stripe iframe helpers, duplicated from tests/payments.spec.ts (per-file-helper convention) ---
+// Needed here because Suite 7's "Resume Subscription" dialog reuses the same
+// embedded Stripe Elements Billing Address/Card component as /payments' own
+// form, so the same iframe-swap/mounting gotchas apply (see CLAUDE.md).
 async function resolveStripeFrameByContent(page: Page, iframeTitle: string, expectedFieldName: string, timeoutMs = 15_000) {
   const deadline = Date.now() + timeoutMs;
   let lastCandidateCount = 0;
@@ -72,35 +59,9 @@ async function cardElementFrame(page: Page) {
   return resolveStripeFrameByContent(page, 'Secure payment input frame', 'Card number');
 }
 
-// Fills the Resume Subscription dialog's embedded Billing Address/Card
-// Stripe Elements form with a given card number (real keystrokes throughout
-// - see CLAUDE.md's Stripe Elements gotcha), checks the 'Save payment
-// details for future purchases' checkbox (with the same documented
-// second-click-may-be-needed guard), and clicks 'Update Payment Method'.
-// Does NOT wait for any particular outcome afterward - success/decline/3DS
-// are each asserted by their own calling test.
+/** Fills the Resume dialog's Stripe form with real keystrokes + settle pauses (a genuine fix for the iframe-swap gotcha, not padding - see CLAUDE.md), checks 'Save payment details', clicks 'Update Payment Method'. Doesn't wait for any outcome. */
 async function fillAndSubmitResumeDialogPaymentMethod(page: Page, cardNumber: string) {
-  // An explicit, shorter-than-default timeout on each pressSequentially()
-  // call - live-verified this project's documented "iframe can swap out
-  // for a new instance mid-sequence, causing a real 30-90s hang on
-  // whichever field is typed into after the swap" gotcha applies here too,
-  // not just in payments.spec.ts. A short timeout makes a stale-frame hang
-  // fail FAST instead of consuming most of the test's own timeout budget,
-  // which matters for callers (7.7/7.8) that wrap this whole function in
-  // their own retry loop - a fast failure leaves room for an actual retry
-  // instead of the first attempt alone eating the whole budget.
   const fieldTimeout = { timeout: 10_000 };
-  // Live-verified root cause (not just a mitigation): reproducing this
-  // exact flow by hand - live, one field at a time, with a natural pause
-  // between each action - succeeded cleanly on the very first attempt,
-  // every time, with zero iframe-swap issues. The automated version below
-  // fires pressSequentially() calls back-to-back with no settle time at
-  // all, which is the likely real trigger for Stripe swapping an iframe
-  // out mid-sequence in the first place, not just something to route
-  // around after the fact. A short, deliberate pause after each field -
-  // same general "give Stripe's own JS a real settle window" reasoning
-  // already applied to the 3D Secure challenge buttons elsewhere in this
-  // project - is a genuine fix, not merely padding.
   const settle = () => page.waitForTimeout(400);
   await (await billingAddressFrame(page)).getByRole('textbox', { name: 'Full name' }).pressSequentially('QA Subscription Test', fieldTimeout);
   await settle();
@@ -130,12 +91,7 @@ async function fillAndSubmitResumeDialogPaymentMethod(page: Page, cardNumber: st
   await updateButton.click();
 }
 
-// Re-opens /subscription's own 'Cancel Subscription' dialog and clicks
-// 'Finish Cancellation' - used by both 7.3 (the first real cancellation) and
-// 7.7 (which needs to re-establish the same cancelling-with-no-payment-
-// method state a second time, per specs/subscription-test-plan.md's own
-// explicit instruction for that scenario, since 7.6 already fully resumed
-// the subscription in between).
+/** Re-opens 'Cancel Subscription' and clicks 'Finish Cancellation' - used by 7.3 and by 7.7 to re-establish the same state after 7.6's resume. */
 async function cancelSubscriptionAndFinish(page: Page) {
   await page.getByRole('button', { name: 'Cancel Subscription', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Cancel Subscription', exact: true })).toBeVisible();
@@ -144,18 +100,9 @@ async function cancelSubscriptionAndFinish(page: Page) {
 }
 
 // --- Plan-card DOM inspection ---
-//
-// The plan-comparison cards' 'selected' visual state (live-verified as a
-// yellow background, rgba(255, 196, 0, 0.25), on the ancestor two levels up
-// from the plan's own <h4> heading - confirmed via direct DOM inspection,
-// see specs/subscription-test-plan.md) has no ARIA-exposed equivalent
-// (no aria-selected/aria-pressed on the card itself) and MUI's own
-// generated class names (e.g. 'mui-6r50xg') are non-deterministic across
-// page loads, so neither a role-based nor a class-based Playwright locator
-// can reliably detect selection state. Reading the ancestor's computed
-// background-color directly via page.evaluate(), the same direct-DOM-
-// inspection approach CLAUDE.md already documents using elsewhere in this
-// project for similarly un-role-able state, is what actually holds up.
+// The 'selected' state has no ARIA equivalent and MUI's class names are
+// non-deterministic across loads, so this reads the ancestor's computed
+// background-color directly instead (see CLAUDE.md's DOM-inspection pattern for un-role-able state).
 const SELECTED_CARD_BACKGROUND = 'rgba(255, 196, 0, 0.25)';
 
 async function getPlanCardState(page: Page, planName: string): Promise<{ selected: boolean; cursor: string; text: string }> {
@@ -176,25 +123,14 @@ async function clickPlanCard(page: Page, planName: string) {
   await page.getByRole('heading', { name: planName, exact: true }).click();
 }
 
-// Selects a paid plan card and clicks 'Continue' - the shared first step of
-// every scenario below that needs to reach either the 'Review Purchase'
-// dialog (before any payment method exists) or the 'Update Subscription'
-// dialog (once one does). Each test that needs this redoes it itself rather
-// than relying on a previous test's client-side selection surviving - this
-// file's beforeEach re-logs in and reloads before every test (see
-// loginAsDisposableAndGoToCompany), which resets any in-page plan selection
-// back to its default (the account's actual current plan, pre-highlighted -
-// see 1.2's finding), exactly the same "don't assume client-side UI state
-// survives across tests" reasoning CLAUDE.md documents elsewhere in this
-// project.
+/**
+ * Selects a paid plan card and clicks 'Continue' - the shared first step to
+ * reach 'Review Purchase' or 'Update Subscription'. Each test redoes this
+ * itself since beforeEach resets any in-page selection (see CLAUDE.md's
+ * client-state gotcha). Only clicks the card if not already selected -
+ * clicking an already-selected card is a real toggle that deselects it.
+ */
 async function selectPlanAndContinue(page: Page, planName: string) {
-  // Only click the card if it isn't ALREADY selected - live-verified while
-  // running this file that clicking an already-selected plan card a second
-  // time deselects it (a genuine single-select toggle, not an idempotent
-  // "set selection to X" handler), which silently broke 3.2/3.3's first
-  // real run (each already clicked the same card once before calling this
-  // helper, then this helper's own unconditional click deselected it,
-  // leaving no plan selected and no 'Review Purchase' dialog able to open).
   const state = await getPlanCardState(page, planName);
   if (!state.selected) {
     await clickPlanCard(page, planName);
@@ -204,77 +140,29 @@ async function selectPlanAndContinue(page: Page, planName: string) {
   await continueButton.click();
 }
 
-// Same trade-off already documented and applied throughout this project
-// (company-details.spec.ts/logo-upload.spec.ts/profile-settings.spec.ts/
-// payments.spec.ts/teams.spec.ts): serial + chromium-only avoids racing
-// parallel browser projects/workers on the one disposable company's
-// Subscription state built up sequentially across this file.
-//
-// Deliberately NO `retries` here, unlike an earlier version of this file
-// (and unlike payments.spec.ts's own retries: 2) - live-verified across SIX
-// consecutive real runs while writing this file that Playwright's own
-// retry mechanism fires each new attempt essentially IMMEDIATELY, with no
-// configurable delay in between. Each retry is a brand new real
-// registration, so 3 attempts (1 original + 2 retries) means 3 real
-// verification emails all queueing into the same real Mandrill/SES pipeline
-// within second of each other - the OPPOSITE of how a human tester would
-// behave (register once, then wait patiently, rather than immediately
-// re-registering when an email seems slow). Combined with this same
-// session's other real registrations (live exploration, planning, and
-// several earlier full-file run attempts), this produced a genuinely
-// self-inflicted burst load enough to make even an already-generous 480s
-// per-attempt budget insufficient 5 runs in a row - confirmed via direct
-// IMAP checks each time that every "timed out" email had, in fact, already
-// arrived, just later than any of the 480s budgets. Firing ONE
-// registration and waiting patiently and considerably longer (see
-// getVerificationLink's own timeout below) - producing exactly ONE email
-// competing for pipeline capacity instead of three - is the fix that
-// actually addresses the root cause instead of just retrying around it.
-//
-// This file's CI-only Chromium software-rendering flags (for the GPU/
-// hCaptcha gotcha documented in CLAUDE.md) live in playwright.config.ts's
-// dedicated `chromium-subscription` project, NOT here as a file-level
-// test.use({ launchOptions }). Live-verified why that doesn't work: CI
-// runs `npx playwright test --grep @real-email` with no --project filter,
-// so a file-level test.use({ launchOptions }) applies across every
-// project attempting this file, not just chromium - webkit's browser
-// crashed outright ("Cannot parse arguments: Unknown option --use-gl=
-// angle") since it doesn't understand Chromium flags. See the
-// `chromium-subscription` project's own comment in playwright.config.ts.
-
+// Serial + chromium-only, avoiding parallel-project races (see CLAUDE.md).
+// Deliberately NO `retries` here, unlike payments.spec.ts - Playwright fires
+// each retry immediately with no delay, so retries would queue multiple real
+// registrations into the same email pipeline within seconds of each other; a
+// single patient wait (see getVerificationLink's timeout below) is the real
+// fix. This file's CI-only Chromium software-rendering flags live in
+// playwright.config.ts's dedicated project, not a file-level test.use() (see CLAUDE.md).
 test.describe('Subscription', () => {
   test.describe.configure({ mode: 'serial' });
 
-  // Subscription does not touch the shared seed account: every
-  // self-registered account gets its own fully isolated Company/Payments/
-  // Subscription record, the same account-isolation reasoning already
-  // established for Payments/Teams (see CLAUDE.md's "Account/company
-  // isolation" section). Register ONE disposable account ONCE here, then
-  // run every scenario below serially against that one throwaway company -
-  // this is especially non-negotiable for this file specifically, since a
-  // genuinely "fresh, no payment method yet" account state (needed to reach
-  // the real Stripe Checkout round-trip in Suite 4) can only be reached
-  // ONCE per account.
+  // Registers ONE disposable account, then runs every scenario serially
+  // against that throwaway company (see CLAUDE.md's account-isolation
+  // pattern) - non-negotiable here, since "fresh, no payment method yet" (Suite 4's real Checkout) is reachable only once per account.
   test.beforeAll(async ({ browser, browserName }) => {
-    // See payments.spec.ts's identical guard for why this is needed on
-    // `beforeAll` itself, not just inside `beforeEach` below.
+    // Guarded here too, not just beforeEach - a beforeEach skip doesn't gate beforeAll (see CLAUDE.md).
     test.skip(
       browserName !== 'chromium',
       'Disposable single-company state built up sequentially across this file; runs once serially on chromium to avoid cross-project races, redundant registrations, and extra real-email load on the other 2 projects.'
     );
 
-    // See this describe block's own top-level comment for the full
-    // reasoning: ONE patient wait, not several quick attempts. 900_000ms
-    // (15 minutes) is deliberately far above every delay actually observed
-    // in this session (every real email confirmed via direct IMAP checks
-    // to have arrived somewhere past the 480s mark, never beyond a few
-    // minutes past it) - a comfortable margin, not a tight fit.
-    test.setTimeout(960_000);
+    test.setTimeout(960_000); // one patient wait, comfortably above every real delay observed (see the describe-level comment above)
 
-    // See payments.spec.ts's identical comment: browser.newPage() alone
-    // creates a page without this project's configured
-    // devices['Desktop Chrome'] context options, which can make the real
-    // verification email never arrive within budget.
+    // newContext() with the device profile, not bare newPage() - see CLAUDE.md's real-email delivery gotcha.
     const context = await browser.newContext({ ...devices['Desktop Chrome'] });
     const page = await context.newPage();
     const emailAlias = generateUniqueEmailAlias();
@@ -309,9 +197,7 @@ test.describe('Subscription', () => {
 
   test.describe('Subscription — Summary Card and Initial Trial State', () => {
     test("1.1 /company's Subscription summary card shows the exact trial plan/date text and a working Manage Subscription link @real-email", async ({ page }) => {
-      // 1. Log in with a fresh, profile-complete, isolated-company account
-      // that has never touched Subscription/Payments, and land on /company
-      // (done by beforeEach above).
+      // 1. Land on /company with a fresh account that's never touched Subscription/Payments (done by beforeEach).
       const subscriptionCard = page.locator('.MuiCard-root').filter({ has: page.getByRole('link', { name: 'Manage Subscription' }) });
       await expect(subscriptionCard.getByText('Job Link Pro + Invoicing (Free Trial)', { exact: true })).toBeVisible();
       await expect(subscriptionCard.getByRole('heading', { name: /^Your Free trial ends at \d{1,2}\/\d{1,2}\/\d{4}$/ })).toBeVisible();
@@ -391,10 +277,7 @@ test.describe('Subscription', () => {
     });
 
     test('2.2 Selecting a plan is a toggle strictly between the two PAID cards — Free never participates in the selection state @real-email', async ({ page }) => {
-      // 1. With Job Link Pro currently selected (re-establishing 2.1's
-      // selection ourselves, since a fresh page load resets it - see
-      // selectPlanAndContinue()'s comment above for why), click 'Job Link
-      // Pro + Invoicing', then click 'Job Link' (Free).
+      // 1. Re-establish Job Link Pro selected (a fresh load resets it, see selectPlanAndContinue()), then Pro + Invoicing, then Free.
       await page.goto(`${BASE_URL}/subscription`);
       await clickPlanCard(page, 'Job Link Pro');
       await clickPlanCard(page, 'Job Link Pro + Invoicing');
@@ -434,15 +317,8 @@ test.describe('Subscription', () => {
       await page.getByRole('button', { name: 'Yearly', exact: true }).click();
       await selectPlanAndContinue(page, 'Job Link Pro');
 
-      // Note: this app's dialogs are NOT scoped by getByRole('dialog') -
-      // live-verified via a real run's captured accessibility snapshot that
-      // this dialog's content (heading, line items, buttons) is fully
-      // present and correct in the DOM, yet page.getByRole('dialog') itself
-      // matches ZERO elements at that exact moment - this app's modal
-      // component apparently doesn't expose role="dialog" the way MUI's
-      // own Dialog does by default. Matches payments.spec.ts's own
-      // established pattern of asserting dialog content directly,
-      // unscoped, rather than via a dialog-role wrapper.
+      // This app's dialogs don't expose role="dialog" (unlike MUI's default)
+      // - asserted directly, unscoped, matching payments.spec.ts's own pattern.
       await expect(page.getByRole('heading', { name: 'Review Purchase', exact: true })).toBeVisible();
       await expect(page.getByText('Job Link Pro (1)', { exact: true })).toBeVisible();
       await expect(page.getByText('$120.00', { exact: true }).first()).toBeVisible();
@@ -471,12 +347,7 @@ test.describe('Subscription', () => {
 
   test.describe('Subscription — Full Successful Purchase via Real Stripe Checkout', () => {
     test("4.1 'Confirm and Pay' navigates to a real, externally-hosted Stripe Checkout Sandbox page reflecting the selected plan and Monthly price @real-email", async ({ page }) => {
-      // 1. Select 'Job Link Pro' ($12.00/month, Monthly by default), click
-      // 'Continue', then click 'Confirm and Pay' in the Review Purchase
-      // dialog - WITHOUT completing the purchase (this test only inspects
-      // the Checkout page; see 4.2 for the real, one-shot purchase that
-      // actually consumes this account's only fresh no-payment-method
-      // window).
+      // 1. Reach Checkout WITHOUT completing the purchase - 4.2 is the real, one-shot purchase that consumes this account's only fresh window.
       test.slow();
       await page.goto(`${BASE_URL}/subscription`);
       await selectPlanAndContinue(page, 'Job Link Pro');
@@ -490,64 +361,33 @@ test.describe('Subscription', () => {
       await expect(page.getByText('per month', { exact: true }).first()).toBeVisible();
       await expect(page.getByRole('link', { name: 'Back to Pre-Staging' })).toBeVisible();
 
-      // CAUTION: do NOT interact with the 'I am an AI agent acting on
-      // behalf of someone else' disclosure checkbox present on this page -
-      // see specs/subscription-test-plan.md overview finding 7 for why (a
-      // live-verified 30-minute tool hang with no further reaction when it
-      // was clicked during exploration). This test only asserts it is
-      // present, never clicks it.
+      // CAUTION: never click the 'I am an AI agent...' checkbox - a real
+      // 30-minute tool hang when clicked during exploration. Only asserted present, never clicked.
       await expect(page.getByText('I am an AI agent acting on behalf of someone else', { exact: false })).toBeVisible();
     });
 
     test("4.2 Completing Checkout with a valid test card (4242...) redirects back with success text and updates /subscription's own active-plan state @real-email", async ({
       page,
     }) => {
-      // This is the ONE test in this whole file that completes a real
-      // Stripe Checkout purchase - the only "fresh, no payment method yet"
-      // window this account will ever have (see this file's own top-level
-      // comment on why `retries` is deliberately omitted from this
-      // describe block).
+      // The ONE test in this file that completes a real Stripe Checkout
+      // purchase - the only "fresh, no payment method yet" window this account will ever have.
       test.slow();
 
-      // 1. Select 'Job Link Pro', click 'Continue', click 'Confirm and
-      // Pay'.
+      // 1. Select 'Job Link Pro', click 'Continue', click 'Confirm and Pay'.
       await page.goto(`${BASE_URL}/subscription`);
       await selectPlanAndContinue(page, 'Job Link Pro');
       await expect(page.getByRole('heading', { name: 'Review Purchase', exact: true })).toBeVisible();
       await page.getByRole('button', { name: 'Confirm and Pay' }).click();
       await expect(page).toHaveURL(/checkout\.stripe\.com/, { timeout: 30_000 });
 
-      // Fill an email address only if Checkout is asking for one and it
-      // isn't already pre-filled - same pattern already proven in
-      // payments.spec.ts's own Checkout round-trip (test 6.6).
+      // Fill an email address only if Checkout is asking for one (same pattern as payments.spec.ts test 6.6).
       const emailField = page.getByLabel('Email');
       if ((await emailField.count()) > 0 && !(await emailField.inputValue())) {
         await emailField.fill(`${disposableUsername}@example.com`);
       }
 
-      // Fill card details. Checkout is a real, separately-hosted page (not
-      // an embedded Stripe Elements iframe), so plain .fill() is fine here.
-      //
-      // Live-verified bug fix #1: these fields must be located by their
-      // ACCESSIBLE NAME (getByRole('textbox', { name })), not by
-      // getByPlaceholder() - Stripe Checkout's real placeholder text for
-      // the card number field is '1234 1234 1234 1234', not 'Card number'
-      // ('Card number' is the field's accessible name/label, a different
-      // string entirely). getByPlaceholder('Card number') matched zero
-      // elements, so the whole block silently never ran, leaving Checkout's
-      // card form empty on submit.
-      //
-      // Live-verified bug fix #2: no premature `.count()` pre-check before
-      // filling. `.count()` is a one-shot, non-retrying read - checked
-      // immediately after the URL changes to checkout.stripe.com, before
-      // this heavy SPA has necessarily finished mounting its card form, it
-      // can genuinely read 0 even though the field appears a moment later,
-      // silently skipping the entire fill block. `.fill()` itself already
-      // auto-waits/retries for the target to become actionable, which is
-      // the correct way to handle this - so these fields are now filled
-      // directly, no manual existence check first. (A count()-gated
-      // conditional remains further down only for the genuinely optional
-      // 'Cardholder name' field, in case it's ever pre-filled.)
+      // A real, separately-hosted page, so plain .fill() works. Located by
+      // ACCESSIBLE NAME, not getByPlaceholder() (Checkout's real placeholder is '1234 1234 1234 1234', not 'Card number').
       await page.getByRole('textbox', { name: 'Card number' }).fill('4242424242424242');
       await page.getByRole('textbox', { name: 'Expiration' }).fill('12/34');
       await page.getByRole('textbox', { name: 'CVC' }).fill('123');
@@ -556,24 +396,9 @@ test.describe('Subscription', () => {
         await cardholderNameField.fill('QA Subscription Test');
       }
 
-      // Deliberately never touches the 'I am an AI agent...' checkbox - see
-      // 4.1's comment for why.
-      //
-      // KNOWN CI-ONLY LIMITATION, not fully fixable from this file - see
-      // the full writeup in CLAUDE.md ("subscription.spec.ts test 4.2 ...
-      // two real, distinct causes found, one fixed, one accepted"). Short
-      // version: Checkout's submit flow depends on a token from hCaptcha's
-      // invisible verification, and that verification can fail to complete
-      // in GitHub Actions specifically. One real cause (a GPU/WebGL stall
-      // in that verification) was found and fixed via this file's own
-      // top-level test.use({ launchOptions }) above. A second, still-open
-      // cause was found but explicitly NOT chased further (2026-08-26,
-      // maintainer decision) - likely hCaptcha's actual bot-detection
-      // heuristics reacting to a well-known datacenter IP range running
-      // pure browser automation, which is close to what it's designed to
-      // catch. This test never fails locally and stays @real-email
-      // (non-blocking CI step) - an occasional CI failure here is expected
-      // and documented, not a new bug to re-investigate from scratch.
+      // Never touches the 'I am an AI agent...' checkbox (see 4.1).
+      // KNOWN CI-ONLY LIMITATION (see CLAUDE.md): an hCaptcha token can fail
+      // in GitHub Actions specifically - one cause fixed, a second accepted as an environment limit. Never fails locally.
       const payButton = page.getByRole('button', { name: /Subscribe|Pay/ });
       await expect(payButton).toBeVisible();
       await payButton.click();
@@ -643,10 +468,7 @@ test.describe('Subscription', () => {
       await expect(page.getByText(/^You will now be subscribed to the Job Link Pro \+ Invoicing \(month\) plan starting .+\.$/)).toBeVisible();
       await expect(page.getByText(/^You are currently subscribed to the Job Link Pro \+ Invoicing \(Monthly\) plan/)).toBeVisible();
       await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeDisabled();
-      // 'Currently Subscribed!' lives outside the DOM subtree
-      // getPlanCardState() reads (live-verified: this exact page-level
-      // check already works correctly in 4.2 above) - checked directly
-      // here rather than via a card's own extracted .text.
+      // 'Currently Subscribed!' lives outside getPlanCardState()'s own DOM subtree - checked directly here instead.
       await expect(page.getByText('Currently Subscribed!', { exact: true })).toBeVisible();
     });
 
@@ -756,12 +578,7 @@ test.describe('Subscription', () => {
       await expect(page.getByRole('button', { name: 'Resume Subscription', exact: true })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Cancel Subscription', exact: true })).toHaveCount(0);
 
-      // The part the UI's banner text alone can't prove: ask Stripe
-      // directly whether the real subscription is actually scheduled to
-      // cancel server-side, not just displaying claimed text. Closes the
-      // gap flagged in specs/account-deletion-billing-test-plan.md's
-      // recommendations section - this suite previously asserted entirely
-      // on UI text/toasts for what happens to the real subscription.
+      // What the UI's banner text alone can't prove: ask Stripe directly whether it's really scheduled to cancel server-side.
       const stripeCustomerId = await stripeFindCustomerByEmail(disposableEmail);
       const subAfterCancel = await stripeFindSubscription(stripeCustomerId);
       expect(subAfterCancel.cancelAtPeriodEnd).toBe(true);
@@ -787,24 +604,15 @@ test.describe('Subscription', () => {
     test("7.5 'Resume Subscription' opens a 'Payment Method' dialog requiring a full new card entry via embedded Stripe Elements — it does NOT resume immediately and does NOT redirect to Checkout @real-email", async ({
       page,
     }) => {
-      // Explicit timeout - the two toPass() retry loops below need real
-      // room on top of this test's own default 30s budget.
-      test.setTimeout(150_000);
+      test.setTimeout(150_000); // room for the two toPass() retry loops below
       // 1. Click 'Resume Subscription'.
       await page.goto(`${BASE_URL}/subscription`);
       await page.getByRole('button', { name: 'Resume Subscription', exact: true }).click();
 
       await expect(page.getByRole('heading', { name: 'Payment Method', exact: true })).toBeVisible();
       await expect(page.getByText('In order to resume your subscription please update your credit card information.', { exact: true })).toBeVisible();
-      // Live-verified flake, reproduced 2/2 times: even though
-      // billingAddressFrame()/cardElementFrame() already confirm their
-      // target field is present before returning, the resolved iframe can
-      // still get swapped out by Stripe for a new instance in the brief
-      // gap before the OUTER toBeVisible() assertion below gets to read it
-      // - the exact "iframe can swap mid-test" gotcha CLAUDE.md documents
-      // at length for payments.spec.ts. Wrapping the whole resolve-then-
-      // read cycle in toPass() re-resolves from scratch on each retry
-      // instead of retrying against a single now-stale frame reference.
+      // Wrapped in toPass() to re-resolve from scratch on each retry - the
+      // resolved iframe can still get swapped for a new instance in the gap before this assertion reads it (see CLAUDE.md).
       await expect(async () => {
         await expect((await billingAddressFrame(page)).getByRole('textbox', { name: 'Full name' })).toBeVisible({ timeout: 5_000 });
       }).toPass({ timeout: 45_000 });
@@ -815,23 +623,11 @@ test.describe('Subscription', () => {
     });
 
     test('7.6 Submitting the Resume dialog with a valid test card (4242...) genuinely resumes the subscription end-to-end @real-email', async ({ page }) => {
-      // Explicit timeout (not just test.slow()'s fixed 90s) - the toPass()
-      // retry loop below needs real room for more than one full attempt on
-      // top of the assertions before/after it.
-      test.setTimeout(210_000);
-      // 1. Redo 7.5's setup, then fill Full name/Address/City/Postal code
-      // and Card Number '4242 4242 4242 4242' with a future expiry and any
-      // CVC using real keystrokes, check 'Save payment details for future
-      // purchases', and click 'Update Payment Method'.
-      // See 7.7/7.8's own comments below for why this whole reopen-then-
-      // fill cycle is wrapped in a retry - the same Stripe iframe-swap
-      // gotcha hit this valid-card path too on one real run (a 90s hang),
-      // after passing reliably many times before that. Safe to retry: a
-      // fresh page load guarantees genuinely blank fields each attempt,
-      // and re-submitting the SAME valid card on a retry is exactly what
-      // 6.5 in specs/payments-test-plan.md already confirmed is harmless
-      // (Stripe accepts a resubmission of identical card details without
-      // any 'already saved' error).
+      test.setTimeout(210_000); // room for the toPass() retry loop below, beyond one full attempt
+      // 1. Redo 7.5's setup, fill the form with a valid card via real
+      // keystrokes, check the checkbox, submit. Wrapped in a retry - the
+      // same iframe-swap gotcha (see CLAUDE.md) hit this path once too. Safe
+      // to retry: a fresh load guarantees blank fields, and resubmitting the same valid card is harmless (see payments.spec.ts 6.5).
       await expect(async () => {
         await page.goto(`${BASE_URL}/subscription`);
         await page.getByRole('button', { name: 'Resume Subscription', exact: true }).click();
@@ -848,9 +644,7 @@ test.describe('Subscription', () => {
       await page.goto(`${BASE_URL}/payments`);
       await expect(page.getByText('**** **** **** 4242', { exact: true }).first()).toBeVisible();
 
-      // Same real-API check as 7.3, in reverse: confirm the resume genuinely
-      // flipped the subscription's cancel_at_period_end back to false
-      // server-side, not just that the UI's toast/banner claims it did.
+      // Same real-API check as 7.3, in reverse: confirms cancel_at_period_end flipped back to false server-side, not just the UI's claim.
       const stripeCustomerId = await stripeFindCustomerByEmail(disposableEmail);
       const subAfterResume = await stripeFindSubscription(stripeCustomerId);
       expect(subAfterResume.cancelAtPeriodEnd).toBe(false);
@@ -859,33 +653,15 @@ test.describe('Subscription', () => {
     test('7.7 Decline flow (4000 0000 0000 0002) in the Resume Subscription dialog shows the same three-surface error pattern already documented for Payments, and leaves the cancelling state unaffected @real-email', async ({
       page,
     }) => {
-      // Explicit timeout (not just test.slow()'s fixed 90s) - the toPass()
-      // retry loop below needs real room for more than one full attempt on
-      // top of the assertions before/after it.
-      test.setTimeout(210_000);
-      // 1. Re-establish a cancelling-with-no-payment-method state (Cancel
-      // Subscription → Finish Cancellation, since 7.6 already fully
-      // resumed the subscription), click 'Resume Subscription' again, fill
-      // the form fully valid except use Card Number '4000 0000 0000 0002',
-      // check the checkbox, and click 'Update Payment Method'.
+      test.setTimeout(210_000); // room for the toPass() retry loop below, beyond one full attempt
+      // 1. Re-establish the cancelling-with-no-payment-method state (7.6 already resumed it), then submit a decline card.
       await page.goto(`${BASE_URL}/subscription`);
       await cancelSubscriptionAndFinish(page);
 
-      // Live-verified flake, reproduced 3/4 times: the fill-then-submit
-      // sequence can occasionally leave no visible outcome at all (no
-      // decline text, no success, no hang/exception either) - the same
-      // "Stripe can swap an iframe out for a new instance mid-sequence"
-      // gotcha CLAUDE.md documents at length, just manifesting as a silent
-      // incomplete-form submission here rather than a hard hang. Retrying
-      // the WHOLE cycle from a fresh page load (not just re-clicking
-      // Update Payment Method) guarantees a genuinely blank form each
-      // attempt - reusing the same already-open dialog on a retry would
-      // risk pressSequentially() appending new digits onto stale leftover
-      // values instead of a clean field. Safe to retry freely: this uses a
-      // real decline test card, so a retry can never accidentally succeed
-      // in charging anything. A 60s budget only fit one full cycle plus a
-      // second one cut short right at its own fresh page.goto() - 150s
-      // gives genuine room for 3+ full attempts.
+      // The fill-then-submit sequence can occasionally leave no visible
+      // outcome at all - the same iframe-swap gotcha (see CLAUDE.md),
+      // manifesting as a silent incomplete submission here. Retries the
+      // WHOLE cycle from a fresh page load, not just the click - safe here since a decline card can never accidentally succeed.
       await expect(async () => {
         await page.goto(`${BASE_URL}/subscription`);
         await page.getByRole('button', { name: 'Resume Subscription', exact: true }).click();
@@ -906,27 +682,10 @@ test.describe('Subscription', () => {
     test('7.8 3D Secure flow (4000 0025 0000 3155) in the Resume Subscription dialog shows the real Stripe-hosted challenge, and completing it resumes the subscription successfully @real-email', async ({
       page,
     }) => {
-      // Explicit timeout (not just test.slow()'s fixed 90s) - the toPass()
-      // retry loop below needs real room for more than one full attempt,
-      // plus the 3DS challenge completion and final assertions after it.
-      test.setTimeout(240_000);
-      // 1. With the same cancelling state (left over from 7.7, since its
-      // decline attempt never completed the resume), open 'Resume
-      // Subscription' again, fill the form fully valid using Card Number
-      // '4000 0025 0000 3155', check the checkbox, and click 'Update
-      // Payment Method'.
-      // Live-verified flake: the same "Stripe can swap an iframe out for a
-      // new instance mid-sequence" gotcha CLAUDE.md documents at length
-      // (and that 7.7 above now guards against too) can also surface here
-      // as a real pressSequentially() hang (30-90s, not a fast failure)
-      // partway through filling this form. Wrapping the whole
-      // reopen-dialog-then-fill cycle in toPass() means a hang or a
-      // silently-incomplete submission both just trigger a fresh retry
-      // (full page reload, guaranteeing genuinely blank fields - see 7.7's
-      // own comment for why re-filling an already-open dialog on retry
-      // would be unsafe) rather than failing the test outright. Safe to
-      // retry freely: nothing here is a one-shot resource the way Suite
-      // 4's real Checkout purchase is.
+      test.setTimeout(240_000); // room for the toPass() loop, plus the 3DS challenge and final assertions
+      // 1. With the same cancelling state left over from 7.7, submit a 3DS
+      // test card - wrapped in a retry for the same iframe-swap gotcha (see
+      // CLAUDE.md), safe since nothing here is a one-shot resource like Suite 4's real Checkout.
       const challengeFrame = page.frameLocator('iframe[src*="three-ds-2-challenge"]').frameLocator('iframe[name="stripe-challenge-frame"]');
       await expect(async () => {
         await page.goto(`${BASE_URL}/subscription`);
@@ -940,10 +699,7 @@ test.describe('Subscription', () => {
       }).toPass({ timeout: 150_000 });
       await expect(challengeFrame.getByRole('button', { name: 'Complete' })).toBeVisible();
 
-      // 2. Wait an explicit ~2 seconds after the challenge content is
-      // confirmed visible (per this project's documented "challenge
-      // buttons render before their click handler attaches" gotcha), then
-      // click 'Complete'.
+      // 2. Wait ~2s for the challenge's own JS to wire up its click handler (see CLAUDE.md), then click 'Complete'.
       await page.waitForTimeout(2_000);
       await challengeFrame.getByRole('button', { name: 'Complete' }).click();
 
@@ -954,10 +710,7 @@ test.describe('Subscription', () => {
 
   test.describe('Subscription — Edge Cases: Refresh Mid-Dialog, Rapid Double-Click, and Interval-Toggle-Without-Reselecting', () => {
     test('8.1 Refreshing /subscription while the Update Subscription dialog is open is completely safe — no partial state, no stuck dialog @real-email', async ({ page }) => {
-      // 1. With an active subscription, select a different plan and click
-      // 'Continue' to open the 'Update Subscription' dialog, then perform a
-      // genuine full-page reload instead of interacting with the dialog
-      // further.
+      // 1. Open the 'Update Subscription' dialog, then reload instead of interacting with it further.
       await page.goto(`${BASE_URL}/subscription`);
       await selectPlanAndContinue(page, 'Job Link Pro + Invoicing');
       await expect(page.getByRole('heading', { name: 'Update Subscription', exact: true })).toBeVisible();
@@ -975,9 +728,7 @@ test.describe('Subscription', () => {
 
     test('8.2 A rapid double-click on Confirm and Pay during an in-app upgrade does not create a duplicate Payment History entry @real-email', async ({ page }) => {
       test.slow();
-      // 1. Select a different (higher-tier) plan, click 'Continue' to open
-      // the 'Update Subscription' dialog, then fire two clicks on 'Confirm
-      // and Pay' as close together as possible.
+      // 1. Open the 'Update Subscription' dialog, then fire two clicks on 'Confirm and Pay' as close together as possible.
       await page.goto(`${BASE_URL}/subscription`);
       await selectPlanAndContinue(page, 'Job Link Pro + Invoicing');
       const confirmButton = page.getByRole('button', { name: 'Confirm and Pay' });
@@ -988,25 +739,14 @@ test.describe('Subscription', () => {
       await expect(page.getByText(/^You are currently subscribed to the Job Link Pro \+ Invoicing/)).toBeVisible();
 
       await page.goto(`${BASE_URL}/company`);
-      // The Payment History grid renders asynchronously after navigation,
-      // in two stages: the header row mounts first, real data rows arrive
-      // shortly after from their own fetch. Live-verified this project's
-      // documented premature-count() race (see this file's earlier fixes)
-      // still applies here even after waiting for row #1 to be visible -
-      // that first row IS the header, always visible immediately
-      // regardless of data-loading state, so it doesn't actually prove any
-      // DATA row has rendered yet. Waiting for the SECOND row (a real data
-      // row, not the header) is what actually closes the race.
+      // Waits for the SECOND row (a real data row), not row #1 (always the
+      // header, visible immediately regardless of load state - see CLAUDE.md's premature-count() race).
       const grid = page.getByRole('grid');
       await expect(grid.getByRole('row').nth(1)).toBeVisible();
       const rowCountBeforeSanityCheck = (await grid.getByRole('row').count()) - 1;
       expect(rowCountBeforeSanityCheck).toBeGreaterThan(0);
-      // A precise "exactly one new row for THIS action" count isn't
-      // meaningful in isolation this late in the file (earlier tests
-      // already added several rows of their own) - the actionable
-      // regression this guards against is a double-submission literally
-      // duplicating the SAME entry, which a same-timestamp/same-title
-      // duplicate pair would reveal.
+      // Not asserting an exact "one new row" count (earlier tests already
+      // added several) - a same-timestamp/same-title duplicate pair is what a real double-submission regression would reveal.
       const titles = await grid.getByRole('row').allTextContents();
       const duplicateCount = titles.filter((t, i) => titles.indexOf(t) !== i).length;
       expect(duplicateCount).toBe(0);
@@ -1015,90 +755,47 @@ test.describe('Subscription', () => {
     test("8.3 Toggling Monthly/Yearly alone can leave 'Continue' enabled-looking but non-functional until the already-selected plan card is explicitly re-clicked, and the resulting success toast's interval text can be wrong @real-email", async ({
       page,
     }) => {
-      // KNOWN ISSUE - intentionally disabled, not a code bug in this test.
-      // Live-verified across 30+ full-suite runs (2026-08-25): even with a
-      // toPass() retry wrapper (100s budget) AND the same settle-pause fix
-      // that made 7.5-7.8 rock solid, this specific "toggle interval without
-      // re-clicking the plan card" interaction remains genuinely
-      // inconsistent - it live-reproduced cleanly by hand exactly once, but
-      // the automated version still occasionally exhausts its full retry
-      // budget stuck on plain /subscription (never reaching
-      // ?success=update). This matches the test plan's own original
-      // "needs dedicated re-verification, mechanism not fully pinned down"
-      // framing (specs/subscription-test-plan.md, finding 26) - most likely
-      // a genuine low-probability race in the app itself, not something a
-      // longer timeout or more retries can fully eliminate from the test
-      // side. The other 24 scenarios in this file are solid (two clean
-      // back-to-back full runs, zero retries needed). Revisit this test only
-      // after the underlying "Continue does nothing after a bare interval
-      // toggle" behavior is instrumented/understood on the app side - see
-      // subscription-bugs-report.md.
+      // KNOWN ISSUE - intentionally disabled, not a code bug here: this
+      // "toggle interval without re-clicking the plan card" interaction
+      // remains genuinely inconsistent even with a retry wrapper - likely a
+      // real low-probability app race (see finding 26, specs/subscription-test-plan.md), not fixable from the test side.
       test.fixme();
       test.slow();
       test.setTimeout(150_000);
       const continueButton = page.getByRole('button', { name: 'Continue', exact: true });
       const confirmAndPayButton = page.getByRole('button', { name: 'Confirm and Pay' });
 
-      // This scenario's outcome is genuinely inconsistent run-to-run
-      // (matching this plan's own explicit "needs dedicated
-      // re-verification" framing): sometimes the page auto-progresses to
-      // success within ~2s with no dialog ever appearing; sometimes a
-      // normal 'Update Subscription' dialog appears needing an explicit
-      // 'Confirm and Pay' click; and live-verified once that NEITHER
-      // outcome happens within budget on a given attempt (no dialog, no
-      // auto-progress either) - a genuine, not-fully-explained flake in
-      // this specific under-characterized interaction, not something this
-      // plan claims to fully understand. Wrapping the whole cycle in a
-      // fresh-reload retry is safe here: repeating the exact same plan
-      // change is idempotent (matches how 5.2/5.3/8.2 already treat in-app
-      // plan changes as safe to redo).
+      // Outcome is genuinely inconsistent run-to-run: sometimes auto-
+      // progresses to success within ~2s with no dialog; sometimes a normal
+      // dialog needs an explicit click; once neither happened within budget
+      // at all. Wrapped in a fresh-reload retry - safe since repeating the same plan change is idempotent (see 5.2/5.3/8.2).
       await expect(async () => {
-        // 1. With a plan already actively subscribed on Monthly billing,
-        // toggle to 'Yearly' WITHOUT re-clicking the already-highlighted
-        // plan card, then click 'Continue'.
+        // 1. Toggle to 'Yearly' WITHOUT re-clicking the already-highlighted plan card, then click 'Continue'.
         await page.goto(`${BASE_URL}/subscription`);
         await page.getByRole('button', { name: 'Yearly', exact: true }).click();
-        // Live-verified fix: a brief settle window after the toggle -
-        // same reasoning as fillAndSubmitResumeDialogPaymentMethod()'s own
-        // settle() pauses above - firing the next click immediately after
-        // this one, with zero gap, is a real contributor to the
-        // inconsistent outcomes documented below, not just something to
-        // paper over with retries.
-        await page.waitForTimeout(500);
+        await page.waitForTimeout(500); // settle window - firing the next click immediately is a real contributor to the inconsistent outcome
 
-        // Live-verified, reproduced twice back-to-back during exploration:
-        // clicking 'Continue' here can produce zero observable reaction.
-        // This step is documented, not strictly asserted as always
-        // reproducing (see specs/subscription-test-plan.md finding 26 for
-        // why the precise mechanism is flagged as needing network
-        // instrumentation, not fully pinned down).
+        // Clicking 'Continue' here can produce zero observable reaction (see finding 26) - documented, not strictly asserted as always reproducing.
         if (await continueButton.isEnabled()) {
           await continueButton.click().catch(() => {});
           await page.waitForTimeout(500);
         }
 
-        // 2. Explicitly click the SAME already-highlighted plan card
-        // again, then click 'Continue' once more.
+        // 2. Explicitly click the SAME already-highlighted plan card again, then click 'Continue' once more.
         await clickPlanCard(page, 'Job Link Pro + Invoicing');
         await page.waitForTimeout(500);
         await expect(continueButton).toBeEnabled();
         await continueButton.click();
         await page.waitForTimeout(500);
 
-        // Handle both outcomes rather than assuming only one - click
-        // 'Confirm and Pay' if a dialog shows up, otherwise rely on the
-        // auto-progress this test's comment above already documented.
+        // Handles both outcomes - clicks 'Confirm and Pay' if a dialog shows up, otherwise relies on the auto-progress noted above.
         if (await confirmAndPayButton.isVisible({ timeout: 5_000 }).catch(() => false)) {
           await confirmAndPayButton.click();
         }
         await expect(page).toHaveURL(/\/subscription\?success=update/, { timeout: 15_000 });
       }).toPass({ timeout: 100_000 });
 
-      // 3. Read the success toast's exact text, then perform a genuine
-      // full-page reload and re-read the main banner text - matching this
-      // project's general "don't trust the toast" gotcha family. Do NOT
-      // assert a specific (possibly-wrong) interval in the toast itself;
-      // only the RELOAD-CONFIRMED state is trustworthy.
+      // 3. Reload and re-read the banner - never trust the toast's own claimed interval (see CLAUDE.md), only the reload-confirmed state.
       await page.goto(`${BASE_URL}/subscription`);
       await expect(page.getByText(/^You are currently subscribed to the Job Link Pro \+ Invoicing \(Yearly\) plan/)).toBeVisible();
       // See 5.2's comment above for why this is a page-level check, not

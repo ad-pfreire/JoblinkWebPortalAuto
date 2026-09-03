@@ -15,25 +15,14 @@ const SEED_USERNAME = requireEnv('TEST_USERNAME');
 const SEED_PASSWORD = requireEnv('TEST_LOGIN_PASSWORD');
 const SEED_EMAIL = `${requireEnv('TEST_EMAIL_USER')}+automation${requireEnv('TEST_EMAIL_DOMAIN')}`;
 
-// The seed account's baseline values - NOT hardcoded. Portability: this
-// suite is meant to run against whatever seed account a given developer/CI
-// environment has configured in .env (TEST_USERNAME/TEST_LOGIN_PASSWORD),
-// not specifically the maintainer's own pfautomation account. A different
-// account almost certainly has a different name/phone already set, so
-// hardcoding literal expected values here (as this file used to) would make
-// it fail immediately against anyone else's seed account. Instead,
-// discoverSeedBaseline() below reads whatever these fields ACTUALLY are on
-// first run and uses that as the "restore point" every test returns to -
-// works with any seed account's current state, sight unseen.
+// The seed account's baseline values - discovered live, not hardcoded, so
+// this suite works against any developer/CI's own seed account (see CLAUDE.md's Portability section).
 let SEED_FIRST_NAME: string;
 let SEED_LAST_NAME: string;
 let SEED_PHONE_FORMATTED: string;
 let SEED_PHONE_DIGITS: string;
 
-// Logs in as the shared seed account and lands on /profile, without
-// asserting anything about the name fields' values - used both by
-// discoverSeedBaseline() (before those values are known) and by
-// loginAsSeedAndGoToProfile() below (after they are).
+/** Logs in as the shared seed account and lands on /profile, without asserting the name fields' values (used before they're known too). */
 async function loginAsSeed(page: Page) {
   await page.goto(`${BASE_URL}/login`);
   await page.locator('input[name="username"]').fill(SEED_USERNAME);
@@ -44,26 +33,18 @@ async function loginAsSeed(page: Page) {
   await expect(page.locator('input[name="firstName"]')).not.toHaveValue('');
 }
 
-// Logs in as the shared seed account and lands on /profile, then confirms
-// the page shows the discovered baseline first name - a sanity check, at
-// the start of every test, that the account is in the same restored state
-// this suite left it in (not a check against a fixed literal anymore, see
-// SEED_FIRST_NAME above).
+/** Logs in as the seed account and confirms it shows the discovered baseline first name - a sanity check that the account is in the expected restored state. */
 async function loginAsSeedAndGoToProfile(page: Page) {
   await loginAsSeed(page);
   await expect(page.locator('input[name="firstName"]')).toHaveValue(SEED_FIRST_NAME);
 }
 
-// Runs once before any test in this file: logs in, reads whatever this seed
-// account's First Name / Last Name / Phone Number currently are, and uses
-// those as SEED_FIRST_NAME/SEED_LAST_NAME/SEED_PHONE_FORMATTED/
-// SEED_PHONE_DIGITS for the rest of the file. Phone digits are extracted
-// from the formatted display value (e.g. "+1 (212) 555-0100" ->
-// "2125550100") by stripping non-digits and dropping a leading US country
-// code "1" if present, since setPhoneNumber() (tests/utils/account.ts)
-// takes bare local digits with the country selected separately - this
-// assumes a US-formatted number, consistent with every phone-editing test
-// in this file already hardcoding country 'United States'.
+/**
+ * Reads the seed account's current First/Last Name/Phone into the SEED_*
+ * globals for the rest of the file. Phone digits are extracted by stripping
+ * non-digits and dropping a leading US country code "1" - assumes a
+ * US-formatted number, consistent with every phone test here hardcoding 'United States'.
+ */
 async function discoverSeedBaseline(browser: import('@playwright/test').Browser) {
   const page = await browser.newPage();
   await loginAsSeed(page);
@@ -75,13 +56,7 @@ async function discoverSeedBaseline(browser: import('@playwright/test').Browser)
   await page.close();
 }
 
-// Clicks Save and waits for the real POST /profile response, rather than
-// just the success toast text. Needed whenever a test performs two real
-// saves close together (e.g. dirty a field, save, then immediately restore
-// it and save again): the success toast from the first save can still be on
-// screen when the second one fires, so asserting on the toast TEXT alone
-// would trivially pass against that still-visible toast without proving the
-// second save actually completed before a following reload/assertion.
+/** Clicks Save and waits for the real POST /profile response, not just the toast (a still-visible first-save toast can mask an incomplete second save - see CLAUDE.md). */
 async function saveAndWaitForSuccess(page: Page, saveButton: Locator) {
   const [response] = await Promise.all([
     page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname === '/profile'),
@@ -90,19 +65,12 @@ async function saveAndWaitForSuccess(page: Page, saveButton: Locator) {
   expect(response.ok()).toBe(true);
 }
 
-// Waits for the app's generic Change Password error banner after a real
-// wrong-Current-Password submission, but first accounts for a real,
-// environmental hazard live-verified 2026-08-27: Cognito's own
-// too-many-failed-attempts throttle (LimitExceededException) can trip on the
-// shared seed account purely from real wrong-password submissions
-// accumulating across frequent test runs/CI re-runs in a short window (this
-// file always exercises the ONE shared seed account - see "Portability" in
-// CLAUDE.md). When throttled, Cognito's own "Attempt limit exceeded, please
-// try after some time." message leaks through verbatim instead of the app's
-// intended generic wrapper - not a defect in the app, just the shared
-// account being temporarily rate-limited. Skip (rather than fail noisily)
-// whenever that transient state is hit, since it doesn't exercise the wrong-
-// password path this suite actually intends to verify.
+/**
+ * Waits for the generic Change Password error banner after a real
+ * wrong-password submission, but skips (not fails) if Cognito's own
+ * too-many-attempts throttle fires instead - a real, transient hazard on
+ * this shared seed account, not a defect in the app (see CLAUDE.md).
+ */
 async function expectGenericPasswordChangeError(page: Page): Promise<Locator> {
   const genericErrorBanner = page.getByText('An unexpected error occurred. Please try again later.', { exact: true });
   const rateLimitBanner = page.getByText('Attempt limit exceeded, please try after some time.', { exact: true });
@@ -114,13 +82,7 @@ async function expectGenericPasswordChangeError(page: Page): Promise<Locator> {
   return genericErrorBanner;
 }
 
-// Injects a synthetic image file into the hidden #profilePicture input by
-// drawing a canvas image, converting it to a Blob, and wiring it up via
-// DataTransfer + a manual "change" event. Standard Playwright
-// setInputFiles() with a Buffer is not reliably usable for synthetic images
-// in every execution context here, but this in-page canvas+DataTransfer
-// technique is live-verified to work and reliably opens the crop modal,
-// exactly like a real file selection would.
+/** Injects a synthetic image into the hidden #profilePicture input via canvas + DataTransfer + "change" - reliably opens the crop modal like a real selection. */
 async function injectCanvasImageFile(
   page: Page,
   { width, height, fileName, mimeType = 'image/png', color = 'blue' }: { width: number; height: number; fileName: string; mimeType?: string; color?: string }
@@ -145,11 +107,7 @@ async function injectCanvasImageFile(
   );
 }
 
-// Same in-page canvas+DataTransfer technique as above, but fills the canvas
-// with randomized noise blocks so the resulting PNG blob is a substantial,
-// non-trivially-compressible size (used for the oversized-image scenario,
-// so toBlob() doesn't optimize a large flat-color image away to almost
-// nothing).
+/** Same as `injectCanvasImageFile()` but fills the canvas with noise blocks, so the PNG can't compress away to almost nothing (used for oversized-image tests). */
 async function injectNoisyCanvasImageFile(page: Page, { width, height, fileName }: { width: number; height: number; fileName: string }) {
   await page.evaluate(
     async ({ width, height, fileName }) => {
@@ -175,10 +133,7 @@ async function injectNoisyCanvasImageFile(page: Page, { width, height, fileName 
   );
 }
 
-// Injects a plain-text (non-image) file the same way, to probe whether the
-// app performs any real content-type validation on the selected "photo"
-// beyond the file input's `accept` attribute (which is a browser/OS-level
-// filename filter only, not a real security/validation boundary).
+/** Injects a plain-text file, to probe whether the app validates content-type beyond the `accept` attribute's filename filter. */
 async function injectTextFile(page: Page, fileName: string, content: string) {
   await page.evaluate(
     ({ fileName, content }) => {
@@ -193,18 +148,8 @@ async function injectTextFile(page: Page, fileName: string, content: string) {
   );
 }
 
-// Every test below reads or mutates the ONE shared seed account
-// (pfautomation) that the rest of this suite also depends on for login -
-// unlike registration/forgot-password, Profile Settings has no way to spin up
-// a disposable account for most of its scenarios (Email/Username are
-// read-only on this page). Running these across 3 parallel browser projects
-// and multiple workers (the default locally; forgot-password.spec.ts and
-// account-registration.spec.ts avoid this entirely by registering a
-// fresh, run-unique account per test) would race on that single account's
-// First Name/Phone/Save state and could leave it corrupted for every other
-// spec file. Serial + chromium-only mirrors the same trade-off those other
-// files already make for their own backend-mutating describes, just applied
-// to the whole file instead of a single block.
+// Reads/writes the shared seed account (Email/Username are read-only, so no
+// disposable-account escape hatch here) - serial + chromium-only avoids racing parallel browser projects (see CLAUDE.md).
 test.describe('Profile Settings', () => {
   test.describe.configure({ mode: 'serial' });
 
@@ -219,15 +164,11 @@ test.describe('Profile Settings', () => {
 
   test.describe('Page UI', () => {
     test('should display all required elements in their default state', async ({ page }) => {
-      // 1. Log in with the seed account and navigate to /profile (done by
-      // beforeEach). Page title and heading.
+      // 1. Land on /profile (done by beforeEach). Page title and heading.
       await expect(page).toHaveTitle('Profile | Job Link');
       await expect(page.getByText('Profile Settings', { exact: true })).toBeVisible();
 
-      // A circular avatar image is visible. The profilePicture file input is
-      // wrapped by TWO separate <label for="profilePicture"> elements (one
-      // around the avatar image, one around the pencil edit-icon badge) -
-      // scope to the avatar itself to avoid a strict-mode ambiguity.
+      // Scoped to the avatar itself - two separate <label for="profilePicture"> elements exist (avatar + pencil badge), a strict-mode ambiguity otherwise.
       await expect(page.locator('label[for="profilePicture"] .MuiAvatar-root')).toBeVisible();
 
       // First Name field: pre-filled, correct placeholder, not disabled.
@@ -355,28 +296,18 @@ test.describe('Profile Settings', () => {
       await firstNameInput.press('Backspace');
       await expect(firstNameInput).toHaveValue(SEED_FIRST_NAME);
 
-      // Notable finding: the "Save" button remains ENABLED even though the
-      // field's current value is now byte-for-byte identical to its
-      // original value. The button's enabled state tracks whether the
-      // field was ever dirtied/touched during this page session, not
-      // whether the current value differs from the original.
+      // Notable finding: 'Save' stays ENABLED even though the value is now
+      // byte-identical to the original - tracks whether the field was ever dirtied, not whether the value actually differs.
       await expect(saveButton).toBeEnabled();
 
-      // 2. (Cleanup) Reload the page (do not click Save) to discard this
-      // no-op dirty state. The page reloads with First Name back to "QA"
-      // and the Save button disabled again, confirming nothing was
-      // actually persisted.
+      // 2. Cleanup: reload (don't click Save) - confirms nothing was actually persisted.
       await page.goto(`${BASE_URL}/profile`);
       await expect(firstNameInput).toHaveValue(SEED_FIRST_NAME);
       await expect(saveButton).toBeDisabled();
     });
 
     test('should keep Email Address and Username genuinely non-editable', async ({ page }) => {
-      // 1. On /profile, inspect the Email Address and Username inputs' DOM
-      // `disabled` property directly (not just visual styling): both
-      // inputs have `disabled === true` at the element level, and
-      // `readOnly === false` - i.e. they rely on the native disabled
-      // attribute, not a readonly/CSS-only trick.
+      // 1. Both inputs rely on the native `disabled` attribute (readOnly === false), not a readonly/CSS-only trick.
       const emailInput = page.locator('input[name="email"]');
       const usernameInput = page.locator('input[name="username"]');
       await expect(emailInput).toBeDisabled();
@@ -394,31 +325,20 @@ test.describe('Profile Settings', () => {
       // spaces) into the "First Name" field.
       await firstNameInput.fill(paddedFirstName);
 
-      // Live-verified via DOM inspection: the input's raw value retains
-      // the whitespace exactly as typed - the field does NOT auto-trim on
-      // input, matching the same untrimmed behavior already documented for
-      // the Login page's username/email field.
+      // The field does NOT auto-trim on input, same as the Login page's username/email field.
       await expect(firstNameInput).toHaveValue(paddedFirstName);
 
       // 2. Click "Save"; it succeeds with the standard success toast.
       await saveButton.click();
       await expect(page.locator('text=Your profile was updated successfully!')).toBeVisible();
 
-      // Live-verified, notable finding that DIFFERS from the documented
-      // plan expectation (specs/profile-settings-test-plan.md section
-      // 2.6, which claims this round-trip trims the whitespace): reloading
-      // the page shows the padded value round-trips through the backend
-      // completely UNCHANGED - the whitespace is NOT trimmed client- or
-      // server-side, so the field still reads "  QA  " after reload.
+      // CORRECTED (differs from specs/profile-settings-test-plan.md section
+      // 2.6, which claims this trims): the padded value round-trips completely UNCHANGED, neither client- nor server-side.
       await page.goto(`${BASE_URL}/profile`);
       await expect(firstNameInput).toHaveValue(paddedFirstName);
 
-      // (Cleanup) Since the round-trip does not trim this on its own,
-      // explicitly restore First Name back to the clean seed value. Reload
-      // afterward (rather than trusting the toast/DOM state alone) to
-      // confirm the restore genuinely round-tripped through the backend -
-      // a lingering toast from the first save above could otherwise make a
-      // toast-only check pass without the second save having landed yet.
+      // Cleanup: restore the clean seed value, confirmed via the real
+      // network response (not the toast) + reload - see CLAUDE.md's second-save gotcha.
       await firstNameInput.fill(SEED_FIRST_NAME);
       await saveAndWaitForSuccess(page, saveButton);
       await page.goto(`${BASE_URL}/profile`);
@@ -436,27 +356,18 @@ test.describe('Profile Settings', () => {
       await firstNameInput.fill(longFirstName);
       await lastNameInput.click();
 
-      // The full 243-character value is accepted with no truncation and no
-      // inline error message of any kind appears on blur; the "Save"
-      // button becomes enabled.
+      // Accepted with no truncation and no inline error; 'Save' becomes enabled.
       await expect(page.locator('text=The field is required')).toHaveCount(0);
       await expect(firstNameInput).toHaveValue(longFirstName);
       await expect(saveButton).toBeEnabled();
 
-      // 2. Click "Save", then reload the page. The full 243-character
-      // value is genuinely accepted and persisted by the backend - a
-      // green success toast appears, and after reload the First Name
-      // field still shows the complete, untruncated 243-character string.
+      // 2. Save, then reload - the full 243 characters genuinely persisted.
       await saveButton.click();
       await expect(page.locator('text=Your profile was updated successfully!')).toBeVisible();
       await page.goto(`${BASE_URL}/profile`);
       await expect(firstNameInput).toHaveValue(longFirstName);
 
-      // 3. (Cleanup) Restore First Name back to "QA" and click "Save"
-      // again. The field reads "QA" and Save succeeds with the same
-      // success toast, restoring the seed account's original First Name.
-      // Reload afterward to confirm the restore genuinely persisted, not
-      // just that the toast/DOM reflected the intended value.
+      // 3. Cleanup: restore, confirmed via reload rather than the toast/DOM alone.
       await firstNameInput.fill(SEED_FIRST_NAME);
       await saveAndWaitForSuccess(page, saveButton);
       await page.goto(`${BASE_URL}/profile`);
@@ -467,11 +378,7 @@ test.describe('Profile Settings', () => {
       const firstNameInput = page.locator('input[name="firstName"]');
       const saveButton = page.getByRole('button', { name: 'Save' });
 
-      // 1. Make a small valid edit to First Name (e.g. "QAX") to enable
-      // Save, then double-click the "Save" button rapidly (two clicks in
-      // immediate succession). Track every POST request to the
-      // profile-save endpoint (live-verified: `POST /profile`) sent as a
-      // result of the double-click.
+      // 1. Dirty First Name to enable Save, then double-click it rapidly, tracking every real POST /profile request it fires.
       await firstNameInput.fill(`${SEED_FIRST_NAME}X`);
       const saveRequests: string[] = [];
       page.on('request', (request) => {
@@ -483,19 +390,11 @@ test.describe('Profile Settings', () => {
       await saveButton.dblclick();
       await expect(page.locator('text=Your profile was updated successfully!')).toBeVisible();
 
-      // Only ONE POST request was actually sent as a result of the
-      // double-click, and only one success toast appeared - the button
-      // correctly guards against duplicate submissions rather than firing
-      // two save requests.
+      // Only ONE POST was actually sent - the button correctly guards against duplicate submissions.
       expect(saveRequests).toHaveLength(1);
 
-      // 2. (Cleanup) Restore First Name back to "QA" and click "Save"
-      // again. The success toast from the double-click above can still be
-      // on screen at this point (it doesn't auto-dismiss instantly), so
-      // asserting on the toast TEXT alone here would trivially pass against
-      // that still-visible toast without proving this second save actually
-      // completed - wait for the real POST /profile response instead, then
-      // reload to confirm the restore genuinely persisted server-side.
+      // 2. Cleanup: restore, waiting for the real POST response rather than
+      // the toast (the first save's toast can still be on screen, see CLAUDE.md).
       await firstNameInput.fill(SEED_FIRST_NAME);
       const [restoreResponse] = await Promise.all([
         page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname === '/profile'),
@@ -509,30 +408,20 @@ test.describe('Profile Settings', () => {
 
   test.describe('Profile Photo Upload', () => {
     test('should restrict the file chooser to image/jpeg, image/png, image/webp via the accept attribute', async ({ page }) => {
-      // 1. On /profile, inspect the underlying `<input type="file"
-      // id="profilePicture">` element (wrapped by the visible avatar
-      // label/pencil edit-icon that triggers the OS file chooser).
+      // 1. Inspect the underlying `<input type="file">`, wrapped by the visible avatar/pencil edit-icon.
       await expect(page.locator('input#profilePicture')).toHaveAttribute('accept', 'image/jpeg,image/png,image/webp');
     });
 
     test('should leave the page completely unchanged when the file chooser is dismissed with no file selected', async ({ page }) => {
       const saveButton = page.getByRole('button', { name: 'Save' });
 
-      // 1. Click the avatar's edit pencil (the second of the two
-      // <label for="profilePicture"> elements - the first wraps the avatar
-      // image itself, this one wraps the pencil badge icon) to open the OS
-      // file chooser, then cancel/dismiss it without selecting any file.
+      // 1. Click the pencil badge (the second of the two <label
+      // for="profilePicture"> elements) to open the OS file chooser, then dismiss it without selecting a file.
       const fileChooserPromise = page.waitForEvent('filechooser');
       await page.locator('label[for="profilePicture"]').last().click();
       await fileChooserPromise;
-      // (Dismissed: intentionally never call setFiles() on the chooser,
-      // simulating a user cancelling the native picker with nothing
-      // selected.)
 
-      // No "Change Profile Picture" modal ever appears (since no file was
-      // selected, there is nothing to crop), and the "Save" button in
-      // particular stays disabled - confirming this is a true no-op with
-      // no partial/broken intermediate state.
+      // A true no-op - no crop modal, Save stays disabled.
       await expect(page.getByRole('heading', { name: 'Change Profile Picture' })).not.toBeVisible();
       await expect(saveButton).toBeDisabled();
     });
@@ -550,10 +439,7 @@ test.describe('Profile Settings', () => {
       // 2. Click "Cancel" instead of "Ok".
       await page.getByRole('button', { name: 'Cancel' }).click();
 
-      // The modal closes immediately with no confirmation prompt, and the
-      // "Save" button remains disabled - confirming Cancel-in-crop-modal is
-      // a clean, no-op discard, with the newly selected file never even
-      // reaching the live-preview/staged state that "Ok" would trigger.
+      // Closes immediately with no prompt - a clean, no-op discard; the file never reaches the live-preview state 'Ok' would trigger.
       await expect(modalHeading).not.toBeVisible();
       await expect(saveButton).toBeDisabled();
     });
@@ -617,15 +503,9 @@ test.describe('Profile Settings', () => {
       await expect(modalHeading).not.toBeVisible();
       await expect(saveButton).toBeEnabled();
 
-      // 2. Reload the page instead of clicking "Save", to discard this
-      // staged invalid change without finding out whether the backend
-      // itself would reject a non-image upload (out of scope per the test
-      // plan against the shared seed account).
+      // 2. Reload instead of Save - discards this staged change without
+      // testing backend rejection (out of scope against the shared seed account).
       await page.goto(`${BASE_URL}/profile`);
-
-      // The page reloads with the avatar and "Save" button back to their
-      // prior (disabled) state, confirming the invalid selection was never
-      // persisted.
       await expect(saveButton).toBeDisabled();
     });
 
@@ -633,9 +513,7 @@ test.describe('Profile Settings', () => {
       // 1. Select a tiny 5x5px PNG file.
       await injectCanvasImageFile(page, { width: 5, height: 5, fileName: 'tiny-photo.png', color: 'red' });
 
-      // The crop modal opens normally with its zoom slider, rendering the
-      // tiny image without any error, warning, or rejection - no minimum
-      // source-dimension enforcement.
+      // Opens normally with no error - no minimum source-dimension enforcement.
       const modalHeading = page.getByRole('heading', { name: 'Change Profile Picture' });
       await expect(modalHeading).toBeVisible();
       await expect(page.getByRole('slider')).toHaveValue('1');
@@ -648,46 +526,33 @@ test.describe('Profile Settings', () => {
     test('should always re-encode the stored photo to a small fixed-size JPEG regardless of the original image\'s size/dimensions', async ({ page, request }) => {
       const saveButton = page.getByRole('button', { name: 'Save' });
 
-      // 1. Select a large 2000x2000px PNG, filled with randomized noise
-      // blocks (visible content, so toBlob() doesn't optimize it away to
-      // almost nothing) - standing in for the plan's ~15MB oversized
-      // original, injected in-page to safely probe this without needing an
-      // actual multi-MB file on disk.
+      // 1. Select a large 2000x2000px noisy PNG (stands in for a real ~15MB oversized original, injected in-page to avoid needing a real file on disk).
       await injectNoisyCanvasImageFile(page, { width: 2000, height: 2000, fileName: 'large-photo.png' });
 
-      // The crop modal opens normally, rendering the full large image with
-      // no lag, warning, or size-related error of any kind, confirming
-      // there is no client-side file-size check blocking this.
+      // Opens normally with no lag/error - no client-side file-size check blocking this.
       const modalHeading = page.getByRole('heading', { name: 'Change Profile Picture' });
       await expect(modalHeading).toBeVisible();
 
-      // 2. Click "Ok", then "Save", and inspect the actual network
-      // response for the uploaded image.
+      // 2. Click "Ok", then "Save", and inspect the real network response.
       await page.getByRole('button', { name: 'Ok' }).click();
       await expect(saveButton).toBeEnabled();
       await saveButton.click();
       await expect(page.locator('text=Your profile was updated successfully!')).toBeVisible();
       await expect(saveButton).toBeDisabled();
 
-      // 3. Reload the page and read the avatar `<img>`'s real stored S3
-      // URL.
+      // 3. Reload and read the avatar's real stored S3 URL.
       await page.goto(`${BASE_URL}/profile`);
       const avatarSrc = await page.locator('label[for="profilePicture"] img').getAttribute('src');
       expect(avatarSrc).toBeTruthy();
 
-      // 4. Fetch the actual stored object directly via an API request
-      // (bypassing any browser image cache) and inspect its real HTTP
-      // response headers: regardless of the original 2000x2000 PNG that
-      // was selected, the crop tool's "Ok" step always canvas-renders the
-      // crop selection down to a small, fixed-size JPEG client-side before
-      // ever uploading.
+      // 4. Fetch the stored object directly (bypassing browser cache) -
+      // regardless of the original 2000x2000 PNG, the crop tool's 'Ok' step always canvas-renders down to a small fixed-size JPEG first.
       const response = await request.get(avatarSrc!);
       expect(response.headers()['content-type']).toBe('image/jpeg');
       const body = await response.body();
       expect(body.length).toBeLessThan(100_000);
 
-      // Confirm the actual rendered pixel dimensions are exactly 250x250,
-      // by loading the same stored URL into a page-side Image object.
+      // Confirm the real rendered pixel dimensions via a page-side Image object.
       const dimensions = await page.evaluate(
         (src) =>
           new Promise<{ width: number; height: number }>((resolve, reject) => {
@@ -699,9 +564,7 @@ test.describe('Profile Settings', () => {
         avatarSrc!
       );
       expect(dimensions).toEqual({ width: 250, height: 250 });
-
-      // (No cleanup possible or needed: same permanent, harmless avatar
-      // side effect already documented in the valid-upload scenario above.)
+      // No cleanup possible or needed - a permanent, harmless avatar side effect.
     });
   });
 
@@ -711,18 +574,12 @@ test.describe('Profile Settings', () => {
       const countryCombobox = phoneInput.locator('xpath=..').getByRole('combobox');
       const saveButton = page.getByRole('button', { name: 'Save' });
 
-      // 1. On /profile, click the country-flag combobox to the left of the
-      // Phone Number field (default: US flag, "us").
+      // 1. Click the country-flag combobox left of Phone Number (default: US).
       await countryCombobox.click();
 
-      // A listbox opens showing every country alphabetically, each option
-      // showing the country name and its dial code; spot-check two
-      // entries. Live-verified via DOM inspection: unlike the quirk
-      // documented for the Complete Profile page's phone widget in
-      // tests/utils/account.ts, this page's getByRole('option', { name })
-      // resolves to exactly ONE element per country (no hidden duplicate
-      // native <select> option was found in the DOM here), so the specific
-      // ambiguity workaround is not needed for this read-only spot-check.
+      // Unlike the Complete Profile phone widget's quirk (see
+      // tests/utils/account.ts), getByRole('option', {name}) resolves to
+      // exactly ONE element per country here - no ambiguity workaround needed for this read-only spot-check.
       await expect(page.getByRole('option', { name: 'United States' })).toBeVisible();
       await expect(page.getByRole('option', { name: 'Mexico' })).toBeVisible();
 
@@ -744,31 +601,18 @@ test.describe('Profile Settings', () => {
       const saveButton = page.getByRole('button', { name: 'Save' });
       const activeOption = page.locator(':focus');
 
-      // 1. Open the country selector listbox and press the "g" key once.
+      // 1. Open the listbox and press "g" once - jumps to 'Gabon' (the
+      // active option is exposed as real DOM focus, queryable via :focus).
       await countryCombobox.click();
       await page.keyboard.press('g');
-
-      // Live-verified via DOM inspection: the listbox's active/highlighted
-      // option is exposed as the real DOM focus - document.activeElement
-      // resolves directly to the highlighted <li role="option"> itself
-      // (not merely an aria-activedescendant pointer elsewhere), so it's
-      // queryable via the standard :focus pseudo-class. The listbox jumps
-      // to "Gabon", the first country alphabetically starting with "G".
       await expect(activeOption).toContainText('Gabon');
 
-      // 2. Press "e" immediately afterward (no delay - the natural pace of
-      // automated key presses). Live-verified, a real finding this
-      // automated run surfaced that the original manual exploration in the
-      // test plan (section 4.6) explicitly flagged as unconfirmed either
-      // way: back-to-back keystrokes with no gap are NOT treated as two
-      // independent single-letter jumps - they combine into a multi-
-      // character search. "ge" jumps to "Georgia", not "Ecuador".
+      // 2. Press "e" immediately after, with no delay - back-to-back
+      // keystrokes combine into a multi-character search ("ge" -> 'Georgia'), not two independent single-letter jumps.
       await page.keyboard.press('e');
       await expect(activeOption).toContainText('Georgia');
 
-      // 3. Waiting out the widget's type-ahead reset window before the next
-      // keystroke DOES make it a fresh single-letter jump: "e" alone (after
-      // the pause) jumps to "Ecuador", the first country starting with "E".
+      // 3. Waiting out the reset window before the next keystroke DOES make it a fresh jump: "e" alone -> 'Ecuador'.
       await page.waitForTimeout(700);
       await page.keyboard.press('e');
       await expect(activeOption).toContainText('Ecuador');
@@ -784,28 +628,18 @@ test.describe('Profile Settings', () => {
       const phoneInput = page.getByRole('textbox', { name: 'Phone Number' });
       const saveButton = page.getByRole('button', { name: 'Save' });
 
-      // 1. With Phone Number showing "+1 (212) 555-0100" (US), open the
-      // country selector and choose "Mexico".
+      // 1. Open the country selector and choose "Mexico".
       await selectPhoneCountry(page, phoneInput, 'Mexico');
 
-      // The Phone Number field immediately resets to just "+52" (the bare
-      // dial code) - all previously entered digits are discarded, not
-      // preserved or reformatted - and the "Save" button becomes enabled
-      // (the field is now dirtied).
+      // Resets to just the bare dial code "+52" - digits discarded, not preserved or reformatted; Save becomes enabled.
       await expect(phoneInput).toHaveValue('+52 ');
       await expect(saveButton).toBeEnabled();
 
-      // 2. (Cleanup) Switch the country back to "United States" and
-      // retype the original digits "2125550100" (via the same helper the
-      // Complete Profile page's own tests already rely on for this widget,
-      // see tests/utils/account.ts), then click Save to restore the
-      // original phone number and confirm the success toast appears again.
+      // 2. Cleanup: switch back and retype the original digits, then save and confirm via reload it genuinely persisted.
       await setPhoneNumber(page, phoneInput, 'United States', SEED_PHONE_DIGITS);
       await expect(phoneInput).toHaveValue(SEED_PHONE_FORMATTED);
       await saveButton.click();
       await expect(page.locator('text=Your profile was updated successfully!')).toBeVisible();
-      // Reload to confirm the restore genuinely persisted server-side,
-      // rather than trusting the toast/DOM state alone.
       await page.goto(`${BASE_URL}/profile`);
       await expect(phoneInput).toHaveValue(SEED_PHONE_FORMATTED);
     });
@@ -815,54 +649,32 @@ test.describe('Profile Settings', () => {
       const countryCodeField = page.locator('input[name="phone.countryCode"]');
       const saveButton = page.getByRole('button', { name: 'Save' });
 
-      // With the country already "United States" (baseline), get to a
-      // clean bare "+1" state first, exactly like the cleanup in the
-      // previous test: switching to a different country and back forces a
-      // real reset (re-selecting the SAME country alone is a no-op in MUI
-      // - see setPhoneNumber()'s comment in tests/utils/account.ts).
+      // Get to a clean bare "+1" state first - switching country and back
+      // forces a real reset (re-selecting the SAME country is a MUI no-op, see tests/utils/account.ts).
       await selectPhoneCountry(page, phoneInput, 'Mexico');
       await selectPhoneCountry(page, phoneInput, 'United States');
       await expect(phoneInput).toHaveValue('+1 ');
 
-      // 1. Type the digit sequence "5551234567" directly into the Phone
-      // Number field in one action (fill(), a programmatic value-set like
-      // a browser autofill/paste, rather than realistic key-by-key
-      // typing). Live-verified: this specific interaction is what
-      // triggers the widget's auto-detect reparse - the same digits typed
-      // key-by-key via pressSequentially do NOT trigger it and instead
-      // format straight into a US-shaped number (see the next test).
+      // 1. fill() the digits in one action (a programmatic value-set,
+      // unlike realistic key-by-key typing) - this specific interaction is
+      // what triggers the widget's auto-detect reparse (see the next test for the pressSequentially() contrast).
       await phoneInput.fill('5551234567');
 
-      // Live-verified, notable finding: the widget's auto-country-
-      // detection logic reparses the digits, recognizes the leading "55"
-      // as Brazil's dial code, and silently switches the country selector
-      // from "United States" ("us") to Brazil ("br") without any user
-      // interaction with the country dropdown itself. The field ends up
-      // reading exactly "+55 (51) 23456-7".
+      // Notable finding: auto-country-detection reparses the digits,
+      // recognizes the leading "55" as Brazil's dial code, and silently switches the country selector with no user interaction with the dropdown.
       await expect(countryCodeField).toHaveValue('br');
       await expect(phoneInput).toHaveValue('+55 (51) 23456-7');
 
-      // 2. Re-select "United States" from the country dropdown again,
-      // without clearing the digits first.
+      // 2. Re-select "United States" without clearing the digits first.
       await selectPhoneCountry(page, phoneInput, 'United States');
 
-      // Live-verified, notable finding that DIFFERS from the documented
-      // plan expectation (specs/profile-settings-test-plan.md section 4.3,
-      // which claims the previously-entered digits carry over reformatted
-      // into a US-shaped "+1 (555) 123-4567"): re-confirmed repeatedly and
-      // consistently against the real pre-staging backend (via a direct
-      // DOM option click, a real Playwright option click, and a keyboard
-      // type-ahead + Enter selection - all three gave the same result),
-      // switching the country back to United States here instead discards
-      // the digits and resets the field to the bare "+1" dial code, exactly
-      // like the ordinary country-switch behavior already covered in the
-      // previous test - it does NOT preserve them.
+      // CORRECTED (differs from specs/profile-settings-test-plan.md section
+      // 4.3, which claims the digits carry over reformatted): switching back
+      // instead discards them and resets to the bare dial code, same as ordinary country-switch behavior - it does NOT preserve them.
       await expect(countryCodeField).toHaveValue('us');
       await expect(phoneInput).toHaveValue('+1 ');
 
-      // (Cleanup) Nothing was ever saved here - Save is enabled purely
-      // from the dirtied field, so reloading discards this harmless no-op
-      // state without needing a real Save.
+      // Cleanup: nothing was ever saved - reloading discards this harmless dirtied-but-unsaved state.
       await page.goto(`${BASE_URL}/profile`);
       await expect(phoneInput).toHaveValue(SEED_PHONE_FORMATTED);
       await expect(saveButton).toBeDisabled();
@@ -872,44 +684,25 @@ test.describe('Profile Settings', () => {
       const phoneInput = page.getByRole('textbox', { name: 'Phone Number' });
       const saveButton = page.getByRole('button', { name: 'Save' });
 
-      // Recreate an invalid "+1 (555) 123-4567" number independently of
-      // the previous test (every test in this suite is self-contained,
-      // since beforeEach resets to the baseline before EVERY test, not
-      // just the first). Live-verified: typing the same invalid-area-code
-      // digit sequence used in the previous test via realistic, sequential
-      // key-by-key typing (setPhoneNumber() below drives the field via
-      // pressSequentially, not fill()) reaches the same final invalid
-      // number, "+1 (555) 123-4567", but via a different, simpler path -
-      // typed this way, the widget never reinterprets the leading "55" as
-      // Brazil's dial code and stays on United States throughout, so this
-      // needs no detour through Brazil at all, formatting straight into a
-      // US-shaped number with an invalid area code.
+      // Recreates the same invalid number independently (beforeEach resets
+      // baseline before every test) - but via realistic key-by-key typing
+      // (setPhoneNumber() uses pressSequentially, not fill()), which never
+      // reinterprets "55" as Brazil's code, formatting straight into a US-shaped number instead.
       await setPhoneNumber(page, phoneInput, 'United States', '5551234567');
       await expect(phoneInput).toHaveValue('+1 (555) 123-4567');
 
       // 1. Click "Save".
       await saveButton.click();
 
-      // A red inline message with the exact text "Invalid phone number"
-      // appears beneath the Phone Number field, the field is marked
-      // invalid (aria-invalid="true"), the "Save" button reverts to
-      // disabled after the failed attempt, and the browser stays on
-      // /profile (no navigation).
       await expect(page.locator('text=Invalid phone number')).toBeVisible();
       await expect(phoneInput).toHaveAttribute('aria-invalid', 'true');
       await expect(saveButton).toBeDisabled();
       await expect(page).toHaveURL(`${BASE_URL}/profile`);
 
-      // 2. (Cleanup) Reset the field back to a clean state and retype the
-      // original valid digits "2125550100" using realistic sequential
-      // typing, then click Save.
+      // 2. Cleanup: retype the original valid digits via realistic typing, then Save.
       await setPhoneNumber(page, phoneInput, 'United States', SEED_PHONE_DIGITS);
       await expect(phoneInput).toHaveValue(SEED_PHONE_FORMATTED);
       await saveButton.click();
-
-      // The field reads "+1 (212) 555-0100" again, matching the original
-      // value exactly, and Save succeeds with the success toast. Reload to
-      // confirm the restore genuinely persisted server-side.
       await expect(page.locator('text=Your profile was updated successfully!')).toBeVisible();
       await page.goto(`${BASE_URL}/profile`);
       await expect(phoneInput).toHaveValue(SEED_PHONE_FORMATTED);
@@ -929,48 +722,31 @@ test.describe('Profile Settings', () => {
       await expect(phoneInput).toHaveValue('');
       await firstNameInput.click();
 
-      // Live-verified, notable finding: NO "The field is required" message
-      // appears anywhere on the page, and the field's border/label do NOT
-      // turn red or show any invalid styling - a genuine difference from
-      // First Name and Last Name, which both show that message immediately
-      // on blur when empty.
+      // Notable finding: NO "The field is required" message or invalid
+      // styling appears - a genuine difference from First/Last Name, which show it immediately on blur.
       await expect(page.locator('text=The field is required')).toHaveCount(0);
 
-      // The "Save" button stays disabled while the field is completely
-      // empty (an empty phone number does not, by itself, dirty/enable
-      // Save the way typing a single digit does).
+      // Save stays disabled - an empty phone doesn't dirty/enable it the way typing a digit does.
       await expect(saveButton).toBeDisabled();
 
-      // 2. Type a single digit ("1") into the empty field.
+      // 2. Type a single digit ("1") into the empty field - reformats to bare "+1", which does dirty/enable Save.
       await phoneInput.click();
       await phoneInput.pressSequentially('1');
-
-      // The field reformats to show just "+1" (the bare dial code, with no
-      // actual subscriber digits), and the "Save" button becomes enabled -
-      // confirming any non-empty content, even a bare dial-code prefix
-      // with no real digits, is enough to dirty/enable Save.
       await expect(phoneInput).toHaveValue('+1 ');
       await expect(saveButton).toBeEnabled();
 
-      // 3. Click "Save" with the field still showing only "+1".
+      // 3. Click "Save" - shows the same "Invalid phone number" message
+      // (not "required") - validation only ever happens at submit time, never on blur.
       await saveButton.click();
-
-      // Submitting shows the same "Invalid phone number" message
-      // documented in the previous test (not a "required" message) -
-      // confirming this field's only validation of any kind happens at
-      // Save-submit time, never on blur, regardless of whether the field
-      // is fully empty or just missing real digits.
       await expect(page.locator('text=Invalid phone number')).toBeVisible();
       await expect(page.locator('text=The field is required')).toHaveCount(0);
       await expect(saveButton).toBeDisabled();
 
-      // 4. (Cleanup) Restore the field to the original valid number
-      // "+1 (212) 555-0100" and click Save.
+      // 4. Cleanup: restore the original valid number and Save.
       await setPhoneNumber(page, phoneInput, 'United States', SEED_PHONE_DIGITS);
       await expect(phoneInput).toHaveValue(SEED_PHONE_FORMATTED);
       await saveButton.click();
       await expect(page.locator('text=Your profile was updated successfully!')).toBeVisible();
-      // Reload to confirm the restore genuinely persisted server-side.
       await page.goto(`${BASE_URL}/profile`);
       await expect(phoneInput).toHaveValue(SEED_PHONE_FORMATTED);
     });
@@ -984,11 +760,8 @@ test.describe('Profile Settings', () => {
       'At least 1 digit',
       'At least 1 special character',
     ];
-    // Live-verified via DOM inspection: each checklist item's paragraph
-    // (and its preceding icon) is rendered in grey when its rule is not yet
-    // satisfied, and switches to this exact green when it is - this color
-    // is the real, live DOM signal used throughout this describe block
-    // instead of guessing at a class name.
+    // Each checklist item switches from grey to this exact green when
+    // satisfied - the real DOM signal used throughout, instead of a class name.
     const SATISFIED_COLOR = 'rgb(46, 125, 50)';
     const UNSATISFIED_COLOR = 'rgb(158, 158, 158)';
 
@@ -1037,10 +810,7 @@ test.describe('Profile Settings', () => {
       // Password.
       await newPasswordInput.fill('NewStrongPass1!');
 
-      // Live-verified: each checklist item's icon and text turn from grey
-      // to this exact green as its corresponding rule is satisfied - all 5
-      // items turn green simultaneously once a password meeting every rule
-      // is typed.
+      // All 5 items turn green simultaneously once a password meeting every rule is typed.
       for (const item of CHECKLIST_ITEMS) {
         await expect(page.getByText(item, { exact: true })).toHaveCSS('color', SATISFIED_COLOR);
       }
@@ -1091,18 +861,10 @@ test.describe('Profile Settings', () => {
       await expect(updateButton).toBeEnabled();
       await updateButton.click();
 
-      // Live-verified against the real backend (this genuinely calls
-      // Cognito with the wrong current password): a red/pink alert banner
-      // shows exactly this generic text - not the specific
-      // "Incorrect username or password." error Cognito actually returns
-      // (visible only in the browser console), unlike the equivalent
-      // failure on the Login page. (expectGenericPasswordChangeError also
-      // skips this test if the seed account is currently Cognito-throttled
-      // instead - see its own comment above.)
+      // This genuinely calls Cognito with the wrong password - shows this
+      // generic text, not Cognito's own specific error (unlike the Login
+      // page's equivalent failure). Skips instead if Cognito is throttled (see expectGenericPasswordChangeError()).
       const genericErrorBanner = await expectGenericPasswordChangeError(page);
-
-      // "Update" reverts to disabled, the modal stays open, and the
-      // browser stays on /profile.
       await expect(updateButton).toBeDisabled();
       await expect(page.getByRole('heading', { name: 'Change Password' })).toBeVisible();
       await expect(page).toHaveURL(`${BASE_URL}/profile`);
@@ -1112,9 +874,7 @@ test.describe('Profile Settings', () => {
       await cancelButton.click();
       await changePasswordButton.click();
 
-      // All three fields are empty again and no leftover error banner is
-      // shown, confirming the modal's state is NOT preserved/cached
-      // between opens.
+      // All three fields are empty again and no leftover error - modal state is NOT preserved/cached between opens.
       await expect(currentPasswordInput).toHaveValue('');
       await expect(newPasswordInput).toHaveValue('');
       await expect(confirmPasswordInput).toHaveValue('');
@@ -1138,10 +898,7 @@ test.describe('Profile Settings', () => {
       await currentPasswordInput.fill('SomeValue123!');
       await toggleButtons.nth(0).click();
 
-      // Live-verified via DOM inspection: Current Password's `type`
-      // attribute changes from "password" to "text", while the other two
-      // fields' visibility is unaffected - each password field has its own
-      // separate, independently-operating toggle button.
+      // Current Password's `type` changes to "text" - the other two are unaffected, each has its own independent toggle.
       await expect(currentPasswordInput).toHaveAttribute('type', 'text');
       await expect(newPasswordInput).toHaveAttribute('type', 'password');
       await expect(confirmPasswordInput).toHaveAttribute('type', 'password');
@@ -1172,41 +929,27 @@ test.describe('Profile Settings', () => {
       // (click into "Confirm New Password") without typing anything.
       await confirmPasswordInput.click();
 
-      // Live-verified, notable finding: NO "The field is required" message
-      // appears beneath New Password - the count stays at 1 (Current
-      // Password only), a genuine inconsistency with the field one above it
-      // in the exact same form.
+      // Notable finding: NO message appears beneath New Password - count
+      // stays at 1, a genuine inconsistency with the field above it in the same form.
       await expect(requiredMessage).toHaveCount(1);
 
-      // 3. To rule out a simple "never been focused" explanation, type a
-      // single character into New Password, delete it again (back to fully
-      // empty), then blur it once more by clicking into Confirm New
-      // Password. (Moving focus away from Confirm New Password here also
-      // blurs IT for the first time while still empty, so its own required
-      // message appears too - independent of New Password's behavior.)
+      // 3. Type then delete a character (rules out "never focused"), then blur again - this also blurs Confirm New Password for the first time.
       await newPasswordInput.click();
       await newPasswordInput.pressSequentially('a');
       await newPasswordInput.press('Backspace');
       await confirmPasswordInput.click();
 
-      // Still NO required-field message for New Password, even after being
-      // genuinely focused, typed into, and cleared - confirming this is a
-      // real, consistent absence of validation feedback for this specific
-      // field's empty state, not merely an untouched-field skip. (Current
-      // Password and now Confirm New Password account for the 2 messages.)
+      // Still NO required-field message for New Password even after being
+      // focused/typed/cleared - a real, consistent absence, not merely an untouched-field skip.
       await expect(requiredMessage).toHaveCount(2);
 
-      // 4. With focus now in the empty "Confirm New Password" field, blur
-      // it (click into "Current Password") without typing anything.
+      // 4. Blur the empty Confirm New Password field too.
       await currentPasswordInput.click();
 
-      // "The field is required" DOES appear for Confirm New Password,
-      // matching Current Password's behavior - confirming New Password is
-      // the outlier of the three, not Current Password or Confirm New
-      // Password.
+      // "The field is required" DOES appear for Confirm New Password - New Password is the outlier of the three.
       await expect(requiredMessage).toHaveCount(2);
 
-      // 5. (Cleanup) Click "Cancel" to close the modal.
+      // 5. Cleanup: close the modal.
       await page.getByRole('button', { name: 'Cancel' }).click();
     });
 
@@ -1219,16 +962,11 @@ test.describe('Profile Settings', () => {
       const satisfiedItems = CHECKLIST_ITEMS.slice(0, 3); // 8 chars, uppercase, lowercase
       const unsatisfiedItems = CHECKLIST_ITEMS.slice(3); // digit, special character
 
-      // 1. Open "Change Password". Type a password with at least 8
-      // characters, an uppercase letter, and a lowercase letter, but
-      // deliberately missing a digit and a special character (e.g.
-      // "WeakPassword") into New Password.
+      // 1. Type a password missing a digit and a special character.
       await changePasswordButton.click();
       await newPasswordInput.fill('WeakPassword');
 
-      // Exactly 3 of the 5 checklist items turn green (satisfied); the
-      // remaining 2 stay grey (not satisfied), showing precisely which
-      // rules are and are not satisfied.
+      // Exactly 3 of the 5 checklist items turn green; the remaining 2 stay grey.
       for (const item of satisfiedItems) {
         await expect(page.getByText(item, { exact: true })).toHaveCSS('color', SATISFIED_COLOR);
       }
@@ -1236,21 +974,16 @@ test.describe('Profile Settings', () => {
         await expect(page.getByText(item, { exact: true })).toHaveCSS('color', UNSATISFIED_COLOR);
       }
 
-      // 2. Fill Confirm New Password with the identical weak value (so it
-      // matches exactly, ruling out a "passwords don't match" explanation)
-      // and also fill Current Password with any value.
+      // 2. Fill Confirm New Password identically (rules out "don't match") and Current Password with any value.
       await confirmPasswordInput.fill('WeakPassword');
       await currentPasswordInput.fill('SomeCurrentPasswordValue');
 
-      // "Update" remains DISABLED - the password-strength checklist is a
-      // real, enforced client-side gate on submission. No additional
-      // inline error message (beyond the checklist's own coloring) appears
-      // anywhere to explain why Update is disabled.
+      // Remains DISABLED - the checklist is a real, enforced client-side gate, with no extra error text explaining why.
       await expect(updateButton).toBeDisabled();
       await expect(page.locator('text=Passwords do not match')).not.toBeVisible();
       await expect(page.locator('text=The field is required')).toHaveCount(0);
 
-      // 3. (Cleanup) Click "Cancel" to close the modal.
+      // 3. Cleanup: close the modal.
       await page.getByRole('button', { name: 'Cancel' }).click();
     });
 
@@ -1262,27 +995,15 @@ test.describe('Profile Settings', () => {
       await changePasswordButton.click();
       await page.keyboard.press('Escape');
 
-      // Live-verified, notable finding: the modal remains fully open -
-      // Escape does NOT close it, unlike the typical default behavior of
-      // most MUI/standard modal dialogs.
+      // Remains fully open - Escape does NOT close it, unlike typical MUI modal default behavior.
       await expect(modalHeading).toBeVisible();
 
-      // 2. With the modal still open, click directly on the modal's
-      // backdrop (the dimmed overlay area outside the dialog box) at a
-      // point not covered by the centered dialog itself.
+      // 2. Click the backdrop directly - also does NOT close it.
       await page.locator('.MuiBackdrop-root').click({ position: { x: 5, y: 5 } });
-
-      // Live-verified: the modal remains fully open - clicking the
-      // backdrop does NOT close it either. Combined with the Escape
-      // finding above, this modal only closes via its explicit "Cancel"
-      // button.
       await expect(modalHeading).toBeVisible();
 
-      // 3. Click the explicit "Cancel" button.
+      // 3. Click 'Cancel' - the one reliable way to dismiss it.
       await page.getByRole('button', { name: 'Cancel' }).click();
-
-      // The modal closes cleanly, confirming Cancel remains the one
-      // reliable way to dismiss this dialog.
       await expect(modalHeading).not.toBeVisible();
     });
 
@@ -1293,23 +1014,16 @@ test.describe('Profile Settings', () => {
       const confirmPasswordInput = page.locator('input[name="confirmNewPassword"]');
       const updateButton = page.getByRole('button', { name: 'Update' });
 
-      // 1. Open "Change Password". Fill Current Password, New Password,
-      // AND Confirm New Password all with the seed account's real, actual
-      // current password - i.e. attempting to "change" the password to the
-      // exact same value it already is.
+      // 1. Fill all three fields with the seed account's real current password - attempting to "change" it to the same value.
       await changePasswordButton.click();
       await currentPasswordInput.fill(SEED_PASSWORD);
       await newPasswordInput.fill(SEED_PASSWORD);
       await confirmPasswordInput.fill(SEED_PASSWORD);
 
-      // Live-verified: the "Update" button becomes ENABLED - there is no
-      // client-side check preventing a user from submitting an identical
-      // new password.
+      // Becomes ENABLED - no client-side check prevents submitting an identical new password.
       await expect(updateButton).toBeEnabled();
 
-      // 2. Deliberately do NOT click "Update" - per the absolute rule
-      // against ever really invoking the password-change endpoint against
-      // the shared seed account, click "Cancel" instead.
+      // 2. Deliberately never click "Update" against the shared seed account - click "Cancel" instead.
       await page.getByRole('button', { name: 'Cancel' }).click();
     });
 
@@ -1320,17 +1034,13 @@ test.describe('Profile Settings', () => {
       const confirmPasswordInput = page.locator('input[name="confirmNewPassword"]');
       const updateButton = page.getByRole('button', { name: 'Update' });
 
-      // 1. Open "Change Password" and fill it with a deliberately wrong
-      // Current Password (safe/guaranteed-to-fail combination) plus a
-      // valid, matching strong New Password and Confirm New Password.
+      // 1. Fill a deliberately wrong (safe, guaranteed-to-fail) Current Password plus a valid matching New Password.
       await changePasswordButton.click();
       await currentPasswordInput.fill('WrongCurrentPass1!');
       await newPasswordInput.fill('NewStrongPass1!');
       await confirmPasswordInput.fill('NewStrongPass1!');
 
-      // Track every request to the real Cognito ChangePassword endpoint
-      // (live-verified: a POST to cognito-idp.us-east-1.amazonaws.com with
-      // the x-amz-target header "AWSCognitoIdentityProviderService.ChangePassword").
+      // Tracks every real request to Cognito's ChangePassword endpoint.
       const changePasswordRequests: string[] = [];
       page.on('request', (request) => {
         if (request.method() === 'POST' && request.headers()['x-amz-target'] === 'AWSCognitoIdentityProviderService.ChangePassword') {
@@ -1338,24 +1048,15 @@ test.describe('Profile Settings', () => {
         }
       });
 
-      // then double-click "Update" rapidly (two clicks in immediate
-      // succession). (expectGenericPasswordChangeError also skips this test
-      // if the seed account is currently Cognito-throttled instead - see its
-      // own comment above.)
+      // Double-click "Update" rapidly (skips instead if Cognito is throttled - see expectGenericPasswordChangeError()).
       await updateButton.dblclick();
       const genericErrorBanner = await expectGenericPasswordChangeError(page);
 
-      // Live-verified via the browser's network log: only ONE Cognito
-      // ChangePassword request was actually sent as a result of the
-      // double-click, and only one generic error banner appeared -
-      // confirming this button also guards against duplicate submissions,
-      // consistent with the same protection already documented for the
-      // outer page's "Save" button.
+      // Only ONE request was actually sent - this button also guards against duplicate submissions, like the outer 'Save' button.
       expect(changePasswordRequests).toHaveLength(1);
       await expect(genericErrorBanner).toHaveCount(1);
 
-      // 2. (Cleanup) Click "Cancel" to close the modal; the seed account's
-      // real password remains unchanged.
+      // 2. Cleanup: close the modal - the seed account's real password remains unchanged.
       await page.getByRole('button', { name: 'Cancel' }).click();
     });
   });
@@ -1367,15 +1068,9 @@ test.describe('Profile Settings', () => {
       // 1. Click "Delete Account" to open its confirmation dialog.
       await page.getByRole('button', { name: 'Delete Account' }).click();
 
-      // The dialog shows heading "Delete Account", the exact body text -
-      // including the known, already-documented copy typo "want o delete"
-      // (missing the "t" in "to"), reproduced here exactly rather than
-      // "fixed" - plus the account-recovery warning text, and both
-      // "No, go back" / "Yes, delete" buttons. This matches exactly what
-      // tests/forgot-password.spec.ts's 'Account deletion (Profile
-      // settings)' test already documents and automates for real (clicking
-      // "Yes, delete") against a disposable account; this test never does
-      // that, since it runs against the shared seed account.
+      // Includes the known copy typo "want o delete" (missing "t"),
+      // reproduced exactly. forgot-password.spec.ts's own test already
+      // automates the real "Yes, delete" click against a disposable account - this one never does, since it's the shared seed account.
       const dialog = page.getByRole('dialog');
       await expect(dialog.getByRole('heading', { name: 'Delete Account' })).toBeVisible();
       await expect(dialog.locator('text=Are you sure you want o delete your Job Link Account?')).toBeVisible();
@@ -1387,14 +1082,10 @@ test.describe('Profile Settings', () => {
       await expect(dialog.getByRole('button', { name: 'No, go back' })).toBeVisible();
       await expect(dialog.getByRole('button', { name: 'Yes, delete' })).toBeVisible();
 
-      // 2. Click "No, go back" - never "Yes, delete" - so the shared seed
-      // account is never actually deleted.
+      // 2. Click "No, go back" - never "Yes, delete" - so the shared seed account is never actually deleted.
       await dialog.getByRole('button', { name: 'No, go back' }).click();
 
-      // The dialog closes, the browser stays on /profile, and the seed
-      // account's data is completely unchanged (First Name still reads
-      // "QA") - proving this is a safe, reversible no-op, distinct from
-      // the real deletion flow already tested end-to-end elsewhere.
+      // A safe, reversible no-op - dialog closes, data completely unchanged.
       await expect(dialog).not.toBeVisible();
       await expect(page).toHaveURL(`${BASE_URL}/profile`);
       await expect(firstNameInput).toHaveValue(SEED_FIRST_NAME);
@@ -1402,10 +1093,7 @@ test.describe('Profile Settings', () => {
   });
 });
 
-// Uses a fresh, disposable, run-unique account (never the shared seed
-// account) so it's safe to actually complete a real password change against
-// the live backend, exactly like forgot-password.spec.ts's own full
-// end-to-end reset and account-deletion describes.
+// Uses a fresh disposable account (never the shared seed account), safe for a real password change against the live backend.
 test.describe('Full end-to-end password change (real email, real code)', () => {
   test.describe.configure({ retries: 1 });
 
@@ -1413,8 +1101,7 @@ test.describe('Full end-to-end password change (real email, real code)', () => {
     test.skip(browserName !== 'chromium', 'Backend-only flow; runs once to avoid tripling load on the real email pipeline.');
     test.setTimeout(300_000);
 
-    // 1. Register a new, run-unique disposable account and verify its
-    // email over IMAP, confirming the redirect to /login.
+    // 1. Register a new disposable account and verify its email, confirming the redirect to /login.
     const emailAlias = generateUniqueEmailAlias();
     const username = generateUsernameFromEmail(emailAlias);
     const originalPassword = requireEnv('TEST_REGISTER_PASSWORD');
@@ -1424,8 +1111,7 @@ test.describe('Full end-to-end password change (real email, real code)', () => {
     await page.goto(verificationLink);
     await expect(page).toHaveURL(`${BASE_URL}/login`);
 
-    // 2. Log in with that account's username and its original
-    // TEST_REGISTER_PASSWORD password.
+    // 2. Log in with the account's original password.
     await page.locator('input[name="username"]').fill(username);
     await page.locator('input[name="password"]').fill(originalPassword);
     await page.locator('button[type="submit"]').click();
@@ -1454,29 +1140,17 @@ test.describe('Full end-to-end password change (real email, real code)', () => {
     await expect(updateButton).toBeEnabled();
     await updateButton.click();
 
-    // 6. Live-verified against the real backend: a green success toast
-    // appears with the exact text "Password updated successfully! Please
-    // log in with your new password.", then - true to the modal's own
-    // warning banner ("...will automatically log you out of all active
-    // sessions...") - the browser is automatically redirected to /login
-    // within a few seconds, with no further action needed.
+    // 6. True to the modal's own warning banner, the browser auto-redirects to /login within a few seconds.
     await expect(page.locator('text=Password updated successfully! Please log in with your new password.')).toBeVisible();
     await expect(page).toHaveURL(`${BASE_URL}/login`, { timeout: 15_000 });
 
-    // 7. Logging in again with the SAME username and the NEW password
-    // proves the change was genuinely persisted server-side, not just a
-    // UI-only confirmation - mirroring the equivalent verification step in
-    // forgot-password.spec.ts's real reset-password and account-deletion
-    // tests.
+    // 7. Logging in with the NEW password proves it was genuinely persisted, not just a UI-only confirmation.
     await page.locator('input[name="username"]').fill(username);
     await page.locator('input[name="password"]').fill(newPassword);
     await page.locator('button[type="submit"]').click();
     await expect(page).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
 
-    // 8. Extra strength check beyond the base plan (same pattern as
-    // forgot-password.spec.ts's account-deletion test): log out, then
-    // confirm the OLD original password no longer works, proving the
-    // change was real rather than merely additive.
+    // 8. Extra strength check: log out and confirm the OLD password no longer works, proving the change was real, not merely additive.
     await page.getByRole('button', { name: 'account of current user' }).click();
     await page.getByRole('menuitem', { name: 'Log Out' }).click();
     await expect(page).toHaveURL(`${BASE_URL}/login`);
