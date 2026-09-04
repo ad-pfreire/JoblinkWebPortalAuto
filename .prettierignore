@@ -1,0 +1,10 @@
+node_modules
+playwright-report
+test-results
+learning
+# Curated docs/config with their own formatting, not Prettier's concern.
+*.md
+.claude
+.github
+.mcp.json
+.vscode

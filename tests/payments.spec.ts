@@ -23,11 +23,6 @@ async function loginAsDisposableAndGoToCompany(page: Page) {
   await page.goto(`${BASE_URL}/company`);
 }
 
-async function loginAsDisposableAndGoToPayments(page: Page) {
-  await loginAsDisposableAndGoToCompany(page);
-  await page.goto(`${BASE_URL}/payments`);
-}
-
 /** Scopes to the real Payments card on /company, not its hidden mobile-accordion duplicate. */
 function paymentsSummaryCard(page: Page) {
   return page.locator('.MuiCard-root').filter({ has: page.getByRole('link', { name: 'Manage Payments' }) });
@@ -505,7 +500,7 @@ test.describe('Payments', () => {
 
       // Accepts the full 128 characters with no truncation or length-limit error.
       await expect(couponInput).toHaveValue(longValue);
-      expect((await couponInput.inputValue()).length).toBe(128);
+      expect(await couponInput.inputValue()).toHaveLength(128);
 
       // 2. Click 'Redeem Coupon' with this long value still in place.
       const appRequests = trackAppRequests(page);
@@ -652,7 +647,7 @@ test.describe('Payments', () => {
 
       // Accepted with no truncation.
       await expect(fullNameField).toHaveValue(longName);
-      expect((await fullNameField.inputValue()).length).toBe(298);
+      expect(await fullNameField.inputValue()).toHaveLength(298);
     });
 
     test("4.6 EXCEPTION to the 4.3/4.4 pattern: 'Postal code' is genuinely NOT a required field — a submission with it blank succeeds outright, with no blocking validation of any kind @real-email", async ({
@@ -1049,7 +1044,7 @@ test.describe('Payments', () => {
       });
 
       // Not a no-op under the hood: creates a genuinely new PaymentMethod (same fingerprint) but detaches the old one.
-      expect(methodsAfter.length).toBe(methodsBefore.length);
+      expect(methodsAfter).toHaveLength(methodsBefore.length);
       expect(methodsAfter[0].id).not.toBe(methodsBefore[0].id);
     });
 

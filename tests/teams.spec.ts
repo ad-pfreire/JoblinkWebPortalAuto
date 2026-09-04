@@ -272,11 +272,11 @@ test.describe('Teams', () => {
 
       // REAL BUG: 'Update' becomes ENABLED with only whitespace, no error - the same fill()-vs-keystrokes gap (see CLAUDE.md), confirmed for Team Name too.
       await expect(updateButton).toBeEnabled();
-      await expect(page.getByText('The field is required', { exact: true })).not.toBeVisible();
+      await expect(page.getByText('The field is required', { exact: true })).toBeHidden();
 
       // 3. Click 'Cancel' rather than submitting, to avoid corrupting the default team's name (3.2 already confirms this persists server-side).
       await page.getByRole('button', { name: 'Cancel' }).click();
-      await expect(page.getByRole('heading', { name: 'Update Team Name' })).not.toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Update Team Name' })).toBeHidden();
       await expect(page.getByRole('heading', { name: 'My Team', level: 4 })).toBeVisible();
     });
 
@@ -408,7 +408,7 @@ test.describe('Teams', () => {
 
       // 2. Click 'Continue' - 'Teams (N)' increments, a new card appears here and under 'Your Teams' on 'For you'.
       await continueButton.click();
-      await expect(page.getByRole('heading', { name: 'Create Team' })).not.toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Create Team' })).toBeHidden();
       await expect(page.getByRole('heading', { name: 'Teams (2)', exact: true })).toBeVisible();
       await expect(teamCard(page, 'QA Second Team')).toBeVisible();
 
@@ -871,7 +871,7 @@ test.describe('Teams', () => {
       await expect(page.getByText('Your team was created successfully!', { exact: true })).toBeVisible();
       await page.getByRole('button', { name: 'Continue' }).click();
 
-      await expect(page.getByRole('heading', { name: 'Create Team' })).not.toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Create Team' })).toBeHidden();
       await expect(page.getByRole('heading', { name: 'Teams (2)', exact: true })).toBeVisible();
 
       // 2. Type a partial match common to both names into 'Select Teams & People'.
@@ -918,7 +918,7 @@ test.describe('Teams', () => {
       await expect(dropdown.getByRole('option', { name: 'QA Automation', exact: true })).toBeVisible();
 
       // 'Teams' is NOT also shown (no team matches this query) - confirms 'People' is a genuinely separate grouping, not a rename/merge.
-      await expect(dropdown.getByText('Teams', { exact: true })).not.toBeVisible();
+      await expect(dropdown.getByText('Teams', { exact: true })).toBeHidden();
     });
   });
 

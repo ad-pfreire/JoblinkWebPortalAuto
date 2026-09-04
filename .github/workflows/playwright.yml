@@ -37,6 +37,20 @@ jobs:
         node-version: lts/*
     - name: Install dependencies
       run: npm ci
+    # Fails fast on a real type error before spending time installing
+    # browsers/running tests - catches typos and API misuse that
+    # `playwright test --list` alone doesn't (it only checks the file
+    # parses, not that the types are actually correct).
+    - name: Type check
+      run: npm run typecheck
+    - name: Lint
+      run: npm run lint
+    # Informational only: the codebase predates this formatter and hasn't
+    # had a one-time reformat pass yet, so this would fail on files as
+    # they exist today. Non-blocking until that pass happens.
+    - name: Format check
+      continue-on-error: true
+      run: npm run format:check
     - name: Install Playwright Browsers
       run: npx playwright install --with-deps
     # Everything except the scenarios that depend on the real pre-staging

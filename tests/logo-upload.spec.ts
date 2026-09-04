@@ -150,7 +150,7 @@ async function expectLogoErrorDialogAndDismiss(page: Page) {
   const continueButton = page.getByRole('button', { name: 'Continue' });
   await expect(continueButton).toBeVisible();
   await continueButton.click();
-  await expect(dialogHeading).not.toBeVisible();
+  await expect(dialogHeading).toBeHidden();
 }
 
 // Reads/writes the shared seed account - serial + chromium-only avoids racing parallel browser projects (see CLAUDE.md).
@@ -213,7 +213,7 @@ test.describe('Logo Upload', () => {
       await injectLogoImageFileAndWaitForUpload(page, { width: 300, height: 300, fileName: 'valid-logo.png', color: 'green' });
 
       // NO crop/zoom modal appears here, unlike Profile Photo Upload - the file submits directly.
-      await expect(page.getByRole('dialog')).not.toBeVisible();
+      await expect(page.getByRole('dialog')).toBeHidden();
       await expect(page.getByRole('slider')).toHaveCount(0);
 
       await expect(page.locator('text=Your logo was uploaded successfully')).toBeVisible();
@@ -297,7 +297,7 @@ test.describe('Logo Upload', () => {
       await page.getByRole('button', { name: 'Continue' }).click();
 
       // Back to prior state - the rejected file never overwrote the saved logo.
-      await expect(dialogHeading).not.toBeVisible();
+      await expect(dialogHeading).toBeHidden();
       await expect(cardImage).toHaveAttribute('src', previousSrc!);
       await expect(logoUploadCard(page).getByRole('button', { name: 'Upload' })).toBeEnabled();
     });
@@ -321,11 +321,11 @@ test.describe('Logo Upload', () => {
 
       // 2. Dismiss, then select exactly 150x150px (the stated minimum).
       await page.getByRole('button', { name: 'Continue' }).click();
-      await expect(dialogHeading).not.toBeVisible();
+      await expect(dialogHeading).toBeHidden();
       await injectLogoImageFileAndWaitForUpload(page, { width: 150, height: 150, fileName: 'exact-150.png', color: 'purple' });
 
       // ACCEPTED - confirms the boundary is inclusive ('150x150 or larger', not 'larger than 150x150').
-      await expect(dialogHeading).not.toBeVisible();
+      await expect(dialogHeading).toBeHidden();
       await expect(page.locator('text=Your logo was uploaded successfully')).toBeVisible();
       await expect(cardImage).toBeVisible();
     });
@@ -390,8 +390,8 @@ test.describe('Logo Upload', () => {
       expect(responseBody).toContain('"ok":false');
       expect(responseBody).toContain('image/webp');
 
-      await expect(logoErrorDialogHeading(page)).not.toBeVisible();
-      await expect(page.locator('text=Your logo was uploaded successfully')).not.toBeVisible();
+      await expect(logoErrorDialogHeading(page)).toBeHidden();
+      await expect(page.locator('text=Your logo was uploaded successfully')).toBeHidden();
       await expect(cardImage).toHaveAttribute('src', previousSrc!);
 
       // A real user gets zero indication anything happened, despite the backend explicitly explaining why it was rejected.
@@ -417,7 +417,7 @@ test.describe('Logo Upload', () => {
 
       // 3. Click 'Continue' - the one reliable way to dismiss it.
       await page.getByRole('button', { name: 'Continue' }).click();
-      await expect(dialogHeading).not.toBeVisible();
+      await expect(dialogHeading).toBeHidden();
     });
   });
 });

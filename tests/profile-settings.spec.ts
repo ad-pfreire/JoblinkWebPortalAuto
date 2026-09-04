@@ -422,7 +422,7 @@ test.describe('Profile Settings', () => {
       await fileChooserPromise;
 
       // A true no-op - no crop modal, Save stays disabled.
-      await expect(page.getByRole('heading', { name: 'Change Profile Picture' })).not.toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Change Profile Picture' })).toBeHidden();
       await expect(saveButton).toBeDisabled();
     });
 
@@ -440,7 +440,7 @@ test.describe('Profile Settings', () => {
       await page.getByRole('button', { name: 'Cancel' }).click();
 
       // Closes immediately with no prompt - a clean, no-op discard; the file never reaches the live-preview state 'Ok' would trigger.
-      await expect(modalHeading).not.toBeVisible();
+      await expect(modalHeading).toBeHidden();
       await expect(saveButton).toBeDisabled();
     });
 
@@ -462,7 +462,7 @@ test.describe('Profile Settings', () => {
 
       // The modal closes, the avatar preview updates, and the "Save"
       // button becomes enabled.
-      await expect(modalHeading).not.toBeVisible();
+      await expect(modalHeading).toBeHidden();
       await expect(saveButton).toBeEnabled();
 
       // 3. Click "Save".
@@ -500,7 +500,7 @@ test.describe('Profile Settings', () => {
       // app is willing to stage an obviously-invalid "photo" for saving
       // without complaint.
       await page.getByRole('button', { name: 'Ok' }).click();
-      await expect(modalHeading).not.toBeVisible();
+      await expect(modalHeading).toBeHidden();
       await expect(saveButton).toBeEnabled();
 
       // 2. Reload instead of Save - discards this staged change without
@@ -520,7 +520,7 @@ test.describe('Profile Settings', () => {
 
       // 2. (No save needed for this scenario.) Click "Cancel" to discard.
       await page.getByRole('button', { name: 'Cancel' }).click();
-      await expect(modalHeading).not.toBeVisible();
+      await expect(modalHeading).toBeHidden();
     });
 
     test('should always re-encode the stored photo to a small fixed-size JPEG regardless of the original image\'s size/dimensions', async ({ page, request }) => {
@@ -817,7 +817,7 @@ test.describe('Profile Settings', () => {
 
       // End: click "Cancel".
       await page.getByRole('button', { name: 'Cancel' }).click();
-      await expect(page.getByRole('heading', { name: 'Change Password' })).not.toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Change Password' })).toBeHidden();
     });
 
     test('should show "Passwords do not match" when Confirm New Password differs from New Password', async ({ page }) => {
@@ -878,7 +878,7 @@ test.describe('Profile Settings', () => {
       await expect(currentPasswordInput).toHaveValue('');
       await expect(newPasswordInput).toHaveValue('');
       await expect(confirmPasswordInput).toHaveValue('');
-      await expect(genericErrorBanner).not.toBeVisible();
+      await expect(genericErrorBanner).toBeHidden();
 
       // (Cleanup) Close the modal.
       await cancelButton.click();
@@ -980,7 +980,7 @@ test.describe('Profile Settings', () => {
 
       // Remains DISABLED - the checklist is a real, enforced client-side gate, with no extra error text explaining why.
       await expect(updateButton).toBeDisabled();
-      await expect(page.locator('text=Passwords do not match')).not.toBeVisible();
+      await expect(page.locator('text=Passwords do not match')).toBeHidden();
       await expect(page.locator('text=The field is required')).toHaveCount(0);
 
       // 3. Cleanup: close the modal.
@@ -1004,7 +1004,7 @@ test.describe('Profile Settings', () => {
 
       // 3. Click 'Cancel' - the one reliable way to dismiss it.
       await page.getByRole('button', { name: 'Cancel' }).click();
-      await expect(modalHeading).not.toBeVisible();
+      await expect(modalHeading).toBeHidden();
     });
 
     test('should not block submission client-side when New Password equals Current Password, but must never actually be submitted', async ({ page }) => {
@@ -1086,7 +1086,7 @@ test.describe('Profile Settings', () => {
       await dialog.getByRole('button', { name: 'No, go back' }).click();
 
       // A safe, reversible no-op - dialog closes, data completely unchanged.
-      await expect(dialog).not.toBeVisible();
+      await expect(dialog).toBeHidden();
       await expect(page).toHaveURL(`${BASE_URL}/profile`);
       await expect(firstNameInput).toHaveValue(SEED_FIRST_NAME);
     });

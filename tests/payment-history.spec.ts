@@ -280,7 +280,7 @@ test.describe('Payment History', () => {
 
       // 2. A genuine new navigation to /company shows the new row.
       const after = await loadCompanyAndGetFirstPageInvoices(page);
-      expect(after.data.length).toBe(before.data.length + 1);
+      expect(after.data).toHaveLength(before.data.length + 1);
       const newInvoice = after.data.find((i: any) => !billingIdsBefore.has(i.number));
       expect(newInvoice).toBeTruthy();
       // Newest-first: the new row is the top row.
@@ -316,6 +316,7 @@ test.describe('Payment History', () => {
       await loginAsDisposableAndGoToCompany(page);
       // Waits for network idle first - this app can fire a second, delayed
       // initial-load request (see CLAUDE.md) that could otherwise land inside the observation window below and get misattributed to the clicks.
+      // eslint-disable-next-line playwright/no-networkidle -- deliberate here, see comment above
       await page.waitForLoadState('networkidle');
       let requestFired = false;
       const onRequest = (url: string) => {
@@ -385,7 +386,7 @@ test.describe('Payment History', () => {
         guard++;
       }
       expect(body.metadata.hasMore).toBe(true);
-      expect(body.data.length).toBe(10);
+      expect(body.data).toHaveLength(10);
       await expect(paymentHistoryFooter(page)).toHaveText('1–10 of more than 10');
       await expect(page.getByRole('button', { name: 'Go to previous page' })).toBeDisabled();
       await expect(page.getByRole('button', { name: 'Go to next page' })).toBeEnabled();
