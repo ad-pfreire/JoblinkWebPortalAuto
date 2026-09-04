@@ -135,8 +135,10 @@ test.describe('Company Details', () => {
       await expect(page.getByText('Address *', { exact: true })).toBeVisible();
       await expect(page.getByRole('textbox', { name: 'Address 2' })).toBeVisible();
       await expect(page.getByText('Address 2 *', { exact: true })).toBeVisible();
-      // Exact name, not /State/ - a regex would also match Country's accessible name ("...United States").
-      await expect(page.getByRole('combobox', { name: 'State Select' })).toBeVisible();
+      // By stable id, not accessible name: State's own accessible name changes
+      // with its value ("State Select" empty vs "State California" filled),
+      // and a plain /State/ regex also matches Country's ("...United States").
+      await expect(page.locator('#mui-component-select-state')).toBeVisible();
       await expect(page.getByText('State *', { exact: true })).toBeVisible();
       await expect(page.getByRole('textbox', { name: 'City' })).toBeVisible();
       await expect(page.getByText('City *', { exact: true })).toBeVisible();
@@ -158,9 +160,13 @@ test.describe('Company Details', () => {
       const saveButton = page.getByRole('button', { name: 'Save' });
       await expect(saveButton).toBeVisible();
 
-      // ADAPTED: disabled here not from empty fields, but the 'State' pre-fill bug (test 4.5) - it never re-hydrates on load.
+      // Save starts disabled on a fresh load regardless of field validity -
+      // it only enables once the form is genuinely dirtied (see test 4.1).
       await expect(saveButton).toBeDisabled();
-      await expect(page.getByRole('combobox', { name: 'State Select' })).toHaveText('Select');
+      // Confirms State genuinely pre-fills with a real value (not the empty
+      // 'Select' placeholder) - the account's specific state isn't hardcoded
+      // here since it's shared, persisted data other tests may change.
+      await expect(page.locator('#mui-component-select-state')).not.toHaveText('Select');
 
       // 2. Country, Address 2, Office Phone Number, Company Website, and
       // Terms and Conditions are editable here but never shown on the read-only card (test 1.1).
@@ -197,6 +203,9 @@ test.describe('Company Details', () => {
       // 1. Click into the 'Address' field and type a partial US street
       // address, e.g. '1725 W North Broadway Anaheim'.
       await page.goto(`${BASE_URL}/company?edit=true`);
+      // Discovers State's value beforehand rather than hardcoding it (see
+      // CLAUDE.md's Portability convention) - it's shared, persisted data.
+      const stateBeforeSelection = await page.locator('#mui-component-select-state').textContent();
       const addressCombobox = page.getByRole('combobox', { name: 'Address' });
       await addressCombobox.click();
       await page.getByRole('button', { name: 'Clear' }).click();
@@ -220,9 +229,15 @@ test.describe('Company Details', () => {
       // name, not the actual city 'Santa Maria' from the suggestion text.
       await expect(page.getByRole('textbox', { name: 'City' })).toHaveValue('Santa Barbara County');
 
-      // State does NOT auto-populate (stays 'Select') despite City/Zip
-      // updating - reproduced 3x, possibly intermittent, flagged for a dev check.
-      await expect(page.getByRole('combobox', { name: 'State Select' })).toHaveText('Select');
+      // State is left genuinely UNCHANGED by this action, despite City/Zip
+      // updating - Google Places' suggestion simply carries no State info,
+      // so the widget neither sets nor clears whatever State already held
+      // (live-verified 2026-09-04: an earlier version of this test assumed
+      // State always reset to empty 'Select' here, which only ever held
+      // because the account's own State was always empty at the time -
+      // once that stopped being true, this assertion needed to become
+      // relative to State's own prior value rather than a hardcoded one).
+      await expect(page.locator('#mui-component-select-state')).toHaveText(stateBeforeSelection!);
 
       // Cleanup: reload instead of Save, so this test never mutates the shared account's persisted data.
       await page.goto(`${BASE_URL}/company?edit=true`);
@@ -361,16 +376,8 @@ test.describe('Company Details', () => {
       const contractorLicense = page.getByRole('textbox', { name: 'Contractor License' });
       const saveButton = page.getByRole('button', { name: 'Save' });
 
-      // Setup: re-select State to reach "every required field valid" (Save
-      // is otherwise disabled due to the State pre-fill bug from test 2.1/4.5, not this test's own subject).
-      const stateCombobox = page.getByRole('combobox', { name: 'State Select' });
-      await stateCombobox.click();
-      await page.getByRole('option', { name: 'California', exact: true }).click();
-      await expect(saveButton).toBeEnabled();
-
-      // 1. With every required field already valid (so Save is enabled),
-      // type an obviously invalid, non-URL value (e.g. 'not a url') into
-      // 'Company Website' and blur it.
+      // 1. Type an obviously invalid, non-URL value (e.g. 'not a url') into
+      // 'Company Website' and blur it - this alone dirties the form and enables Save.
       await website.click();
       await website.fill('not a url');
       await contractorLicense.click();
@@ -387,11 +394,14 @@ test.describe('Company Details', () => {
       const saveResponse = await saveResponsePromise;
       expect(saveResponse.status()).toBe(200);
 
-      // Stays on /company?edit=true, Save stays enabled, and NO toast/error
-      // of any kind appears - not toHaveCount(0), since Next.js's own empty
-      // route-announcer also carries role="alert" (see CLAUDE.md).
+      // Stays on /company?edit=true, and NO toast/error of any kind appears -
+      // not toHaveCount(0), since Next.js's own empty route-announcer also
+      // carries role="alert" (see CLAUDE.md). Save goes back to disabled here
+      // - not because the invalid value was rejected (it wasn't, see step 3),
+      // but because a successful save resets the form's own clean baseline,
+      // the same "nothing changed yet" gate covered in test 4.5.
       await expect(page).toHaveURL(`${BASE_URL}/company?edit=true`);
-      await expect(saveButton).toBeEnabled();
+      await expect(saveButton).toBeDisabled();
       await expect(page.getByRole('alert')).toHaveText('');
       await expect(page.getByText(/error/i)).toHaveCount(0);
 
@@ -433,12 +443,6 @@ test.describe('Company Details', () => {
       const companyName = page.getByRole('textbox', { name: 'Company Name' });
       const contractorLicense = page.getByRole('textbox', { name: 'Contractor License' });
       const email = page.getByRole('textbox', { name: 'Email' });
-      const stateCombobox = page.getByRole('combobox', { name: 'State Select' });
-
-      // Setup: Address/City/Zip/Country already hold valid values (2.4 has
-      // its own coverage). State must still be re-selected (the pre-fill bug from 2.1/4.5).
-      await stateCombobox.click();
-      await page.getByRole('option', { name: 'California', exact: true }).click();
 
       // 1. Change Company Name/Contractor License/Email to new temporary
       // values, save, and confirm via reload they genuinely round-tripped -
@@ -468,8 +472,6 @@ test.describe('Company Details', () => {
       // Cleanup: restore the baseline values, confirmed via the real
       // response + reload (see CLAUDE.md's second-save-toast gotcha).
       await page.goto(`${BASE_URL}/company?edit=true`);
-      await stateCombobox.click();
-      await page.getByRole('option', { name: 'California', exact: true }).click();
       await companyName.fill('QA Automation Test Co');
       await contractorLicense.fill('LIC-123456');
       await email.fill('qa-company-test@crifa.com');
@@ -528,8 +530,10 @@ test.describe('Company Details', () => {
       // Address 2 ('Suite 100') never appears - captured by the edit form but never surfaced on the read-only card.
       expect(locationInnerText).not.toContain('Suite 100');
 
-      // Sanity-check the full expected content is otherwise present.
-      expect(locationInnerText).toContain('Santa Barbara County, California, 93458, United States');
+      // Sanity-check the full expected content is otherwise present. State's
+      // own name isn't hardcoded - test 4.5 leaves it as whichever of
+      // California/Texas it last saved (see CLAUDE.md's Portability convention).
+      expect(locationInnerText).toMatch(/Santa Barbara County, (California|Texas), 93458, United States/);
     });
 
     test("4.4 Company Email and Phone Number are fully independent of the logged-in user's own Profile Settings identity fields", async ({
@@ -561,32 +565,42 @@ test.describe('Company Details', () => {
       expect(companyPhoneDigits).not.toBe(profilePhoneDigits);
     });
 
-    test("4.5 REAL BUG: re-entering the edit form after a save fails to pre-fill the 'State' dropdown, even though the read-only card's Location correctly reflects the saved state", async ({
+    test("4.5 (fixed 2026-09-04) State genuinely re-hydrates on reload after a real save - previously a REAL BUG (empty 'Select'), confirmed fixed via live re-verification", async ({
       page,
     }) => {
-      // 1. Save with State genuinely selected as 'California' first, so the backend holds it before re-entering the form.
+      // 1. Save with State genuinely selected first, so the backend holds it
+      // before re-entering the form. Picks whichever of California/Texas
+      // ISN'T already selected (discovered, not hardcoded). This has to be a
+      // real change from the CURRENTLY persisted value, not just any click:
+      // the form's dirty-tracking compares against the value it originally
+      // loaded with, so selecting-away-then-back-to-the-same-value (verified
+      // live) leaves it looking "unchanged" again and Save never enables.
       await page.goto(`${BASE_URL}/company?edit=true`);
-      const stateCombobox = page.getByRole('combobox', { name: 'State Select' });
+      const stateCombobox = page.locator('#mui-component-select-state');
+      const targetState = (await stateCombobox.textContent()) === 'California' ? 'Texas' : 'California';
       await stateCombobox.click();
-      await page.getByRole('option', { name: 'California', exact: true }).click();
+      await page.getByRole('option', { name: targetState, exact: true }).click();
       await saveCompanyDetailsAndWaitForNavigation(page);
 
-      // The read-only card confirms State really persisted, setting up the real defect asserted next.
-      await expect(companyDetailsCard(page).getByText(/California/)).toBeVisible();
+      // The read-only card confirms State really persisted.
+      await expect(companyDetailsCard(page).getByText(new RegExp(targetState))).toBeVisible();
 
       // 2. Navigate to /company?edit=true again.
       await page.goto(`${BASE_URL}/company?edit=true`);
 
-      // REAL BUG: State shows empty 'Select' even though City/Zip/Address
-      // all correctly pre-fill - isolated to just the State combobox.
-      await expect(page.getByRole('combobox', { name: 'State Select' })).toHaveText('Select');
-      await expect(page.locator('input[name="state"]')).toHaveValue('');
+      // FIXED: State now correctly re-hydrates from the saved value, both
+      // visually and in the underlying form input - previously this stayed
+      // empty ('Select'/'') even though City/Zip/Address always pre-filled fine.
+      await expect(stateCombobox).toHaveText(targetState);
+      await expect(page.locator('input[name="state"]')).toHaveValue(targetState === 'California' ? 'CA' : 'TX');
       await expect(page.getByRole('textbox', { name: 'City' })).toHaveValue('Santa Barbara County');
       await expect(page.getByRole('textbox', { name: 'Zip Code' })).toHaveValue('93458');
       await expect(page.getByRole('combobox', { name: 'Address' })).toHaveValue('1725 North Broadway');
 
-      // 3. Save is disabled without touching State - the form genuinely
-      // treats it as invalid, forcing the user to re-select it on every edit.
+      // 3. Save is still disabled here - but not because State (or anything
+      // else) is invalid. It's the form's normal "nothing changed yet" gate:
+      // live-verified that touching ANY field (State included) enables it,
+      // and re-selecting State's own already-correct value does not (no net change).
       await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
     });
   });
