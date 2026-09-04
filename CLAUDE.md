@@ -319,10 +319,10 @@ CI (`.github/workflows/playwright.yml`) runs `@real-email` tests in a separate s
 ```bash
 npm run typecheck    # tsc --noEmit - catches real type errors, not just parse errors
 npm run lint          # eslint . - see eslint.config.js for which playwright/* rules are deliberately off and why
-npm run format:check  # prettier --check . - informational only for now, see below
+npm run format:check  # prettier --check .
 npm run format        # prettier --write .
 ```
 
-Both `typecheck` and `lint` run in CI before the browsers even install (fail fast). `eslint.config.js` turns off several `eslint-plugin-playwright` rules (`no-conditional-in-test`, `no-conditional-expect`, `no-wait-for-timeout`, `no-skipped-test`, `prefer-web-first-assertions`, `expect-expect`) because, in this suite specifically, every real instance of what they flag turned out to be a deliberate pattern already documented elsewhere in this file (a value captured for later comparison, a `test.skip()` guard, a `waitForTimeout()` tied to a live-verified timing gotcha, etc.) - see the comments in that file for the reasoning behind each one before re-enabling any of them.
+`typecheck`, `lint`, and `format:check` all run in CI before the browsers even install (fail fast), all three blocking. `eslint.config.js` turns off several `eslint-plugin-playwright` rules (`no-conditional-in-test`, `no-conditional-expect`, `no-wait-for-timeout`, `no-skipped-test`, `prefer-web-first-assertions`, `expect-expect`) because, in this suite specifically, every real instance of what they flag turned out to be a deliberate pattern already documented elsewhere in this file (a value captured for later comparison, a `test.skip()` guard, a `waitForTimeout()` tied to a live-verified timing gotcha, etc.) - see the comments in that file for the reasoning behind each one before re-enabling any of them.
 
-`format:check` runs in CI too, but as `continue-on-error: true` - the codebase predates Prettier and hasn't had a one-time reformat pass applied yet, so it currently fails on most existing spec files. Run `npm run format` for a one-time repo-wide reformat when that's wanted (whitespace/wrapping only, not a code-behavior change) - it wasn't run as part of introducing this tooling to keep that specific diff a separate, deliberate decision rather than bundled silently into unrelated changes.
+The whole codebase went through a one-time `npm run format` pass on 2026-09-04 (whitespace/wrapping only, no code-behavior change) - keep it that way by running `npm run format` before committing anything `format:check` would flag, rather than letting drift build back up.

@@ -125,7 +125,10 @@ async function getOwnedMongoSnapshot(userId: string) {
     const teams = await db.collection('teams').find({ owner_id: userId }).toArray();
     const teamIds = teams.map((t) => String(t._id));
     const teamMemberships = teamIds.length
-      ? await db.collection('team_memberships').find({ team_id: { $in: teamIds } }).toArray()
+      ? await db
+          .collection('team_memberships')
+          .find({ team_id: { $in: teamIds } })
+          .toArray()
       : [];
     return { memberships, teams, teamMemberships };
   });
@@ -237,7 +240,12 @@ async function deleteAccountViaUI(page: Page) {
 }
 
 /** Invites `memberEmail` from the owner's page, then accepts it in a separate context so the owner's own session is undisturbed. */
-async function inviteAndAcceptMember(ownerPage: Page, browser: import('@playwright/test').Browser, memberEmail: string, memberUsername: string) {
+async function inviteAndAcceptMember(
+  ownerPage: Page,
+  browser: import('@playwright/test').Browser,
+  memberEmail: string,
+  memberUsername: string
+) {
   await ownerPage.goto(`${BASE_URL}/teams/members`);
   await ownerPage.getByRole('button', { name: 'Invite Member' }).click();
   await expect(ownerPage.getByRole('heading', { name: 'Invite Member' })).toBeVisible();
@@ -323,7 +331,9 @@ test.describe('Account Deletion & Billing', () => {
 
       const ownerTier = await getUserTier(ownerMongoId);
       if (ownerTier !== 'pro') {
-        throw new Error(`Expected owner's own tier to be "pro" immediately after purchase, got "${ownerTier}". Aborting - every test below assumes a genuinely active paid subscription.`);
+        throw new Error(
+          `Expected owner's own tier to be "pro" immediately after purchase, got "${ownerTier}". Aborting - every test below assumes a genuinely active paid subscription.`
+        );
       }
 
       // Connects the member at both levels Suite 5 needs: company-wide invite/accept, and team-level.
@@ -340,7 +350,9 @@ test.describe('Account Deletion & Billing', () => {
       );
     });
 
-    test('3.1 Deleting the account while the subscription is still genuinely active immediately cancels it for real @real-email', async ({ page }) => {
+    test('3.1 Deleting the account while the subscription is still genuinely active immediately cancels it for real @real-email', async ({
+      page,
+    }) => {
       // 1. Ground-truth confirmation the subscription is genuinely active
       // and NOT already scheduled to cancel, before touching the UI.
       const before = await stripeRequest('GET', `/subscriptions/${stripeSubscriptionId}`);
@@ -408,7 +420,7 @@ test.describe('Account Deletion & Billing', () => {
     // Of 7 real deletions tried, re-registering with the same email+username
     // succeeded 6 times and failed once ("User already exists") - too
     // inconsistent for a hard pass/fail assertion, so this logs the outcome instead of asserting on it.
-    test("6.1 Attempting to re-register with the exact same email and username as a just-deleted account is logged, not asserted on @real-email", async ({
+    test('6.1 Attempting to re-register with the exact same email and username as a just-deleted account is logged, not asserted on @real-email', async ({
       page,
       browserName,
     }) => {
@@ -442,11 +454,14 @@ test.describe('Account Deletion & Billing', () => {
   });
 
   test.describe('Account Deletion Behaves the Same Regardless of Subscription State at Deletion Time', () => {
-    test("7.1 Deleting an account whose subscription is already SCHEDULED to cancel (not yet lapsed) force-finalizes the cancellation immediately @real-email", async ({
+    test('7.1 Deleting an account whose subscription is already SCHEDULED to cancel (not yet lapsed) force-finalizes the cancellation immediately @real-email', async ({
       page,
       browserName,
     }) => {
-      test.skip(browserName !== 'chromium', 'Real Stripe purchase + deletion; runs once to avoid tripling load on the real email/Stripe pipeline.');
+      test.skip(
+        browserName !== 'chromium',
+        'Real Stripe purchase + deletion; runs once to avoid tripling load on the real email/Stripe pipeline.'
+      );
       test.setTimeout(480_000);
 
       // 1. Register, purchase Job Link Pro (Monthly), then schedule a real
@@ -488,7 +503,10 @@ test.describe('Account Deletion & Billing', () => {
       browser,
       browserName,
     }) => {
-      test.skip(browserName !== 'chromium', 'Real Stripe purchase + Test Clock + deletion; runs once to avoid tripling load on the real email/Stripe pipeline.');
+      test.skip(
+        browserName !== 'chromium',
+        'Real Stripe purchase + Test Clock + deletion; runs once to avoid tripling load on the real email/Stripe pipeline.'
+      );
       test.setTimeout(960_000);
 
       // 1. Register, purchase, schedule a cancellation, then drive a real
@@ -531,7 +549,10 @@ test.describe('Account Deletion & Billing', () => {
       page,
       browserName,
     }) => {
-      test.skip(browserName !== 'chromium', 'Real Stripe purchase + deletion; runs once to avoid tripling load on the real email/Stripe pipeline.');
+      test.skip(
+        browserName !== 'chromium',
+        'Real Stripe purchase + deletion; runs once to avoid tripling load on the real email/Stripe pipeline.'
+      );
       test.setTimeout(480_000);
 
       // 1. Register and purchase Job Link Pro + Invoicing, Yearly - a
@@ -565,7 +586,10 @@ test.describe('Account Deletion & Billing', () => {
       browser,
       browserName,
     }) => {
-      test.skip(browserName !== 'chromium', 'Two real registrations + an invitation email + a deletion; runs once to avoid tripling load on the real email pipeline.');
+      test.skip(
+        browserName !== 'chromium',
+        'Two real registrations + an invitation email + a deletion; runs once to avoid tripling load on the real email pipeline.'
+      );
       test.setTimeout(600_000);
 
       // 1. Register owner and member, invite/accept. No real purchase needed

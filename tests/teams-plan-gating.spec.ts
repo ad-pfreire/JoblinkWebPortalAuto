@@ -155,7 +155,12 @@ async function loginAs(page: Page, username: string) {
 
 // Reuses the exact invite -> real email -> accept pattern already proven in
 // teams.spec.ts test 6.7 and account-deletion-billing.spec.ts.
-async function inviteAndAcceptMember(ownerPage: Page, browser: import('@playwright/test').Browser, memberEmail: string, memberUsernameArg: string) {
+async function inviteAndAcceptMember(
+  ownerPage: Page,
+  browser: import('@playwright/test').Browser,
+  memberEmail: string,
+  memberUsernameArg: string
+) {
   await ownerPage.goto(`${BASE_URL}/teams/members`);
   await ownerPage.getByRole('button', { name: 'Invite Member' }).click();
   await expect(ownerPage.getByRole('heading', { name: 'Invite Member' })).toBeVisible();
@@ -211,7 +216,9 @@ async function cancelSubscriptionAndFinish(page: Page) {
   await page.getByRole('button', { name: 'Cancel Subscription', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Cancel Subscription', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Finish Cancellation' }).click();
-  await expect(page.getByText(/^You are currently on the .+ plan\. You will lose these features on .+ unless you resubscribe\.$/)).toBeVisible();
+  await expect(
+    page.getByText(/^You are currently on the .+ plan\. You will lose these features on .+ unless you resubscribe\.$/)
+  ).toBeVisible();
 }
 
 test.describe('Teams Plan Gating', () => {
@@ -302,7 +309,9 @@ test.describe('Teams Plan Gating', () => {
     const ownerUserDoc = await getUserByEmail(emailAlias);
     const memberUserDoc = await getUserByEmail(memberEmailAlias);
     if (!ownerUserDoc || !memberUserDoc) {
-      throw new Error('Could not resolve owner/member Mongo user documents after invite/accept - aborting, every test below assumes both exist.');
+      throw new Error(
+        'Could not resolve owner/member Mongo user documents after invite/accept - aborting, every test below assumes both exist.'
+      );
     }
     ownerMongoId = String(ownerUserDoc._id);
     memberMongoId = String(memberUserDoc._id);
@@ -338,7 +347,9 @@ test.describe('Teams Plan Gating', () => {
   });
 
   test.describe('Teams — Does Plan Gating Actually Block Anything?', () => {
-    test('2.1 REAL FINDING: creating a team on a genuinely lapsed (no active subscription) account succeeds completely, with no restriction of any kind @real-email', async ({ page }) => {
+    test('2.1 REAL FINDING: creating a team on a genuinely lapsed (no active subscription) account succeeds completely, with no restriction of any kind @real-email', async ({
+      page,
+    }) => {
       // 1. On the lapsed account, navigate to /teams and confirm '+ Create
       // Team'/'Invite Member' are enabled, not just present.
       await page.goto(`${BASE_URL}/teams`);
@@ -371,7 +382,9 @@ test.describe('Teams Plan Gating', () => {
       await expect(page.getByRole('combobox', { name: 'Add People by Email' })).toBeVisible();
     });
 
-    test("2.3 REAL FINDING: Integrations, on the exact same lapsed account, correctly IS gated — confirming Teams' lack of gating is a real gap, not a universal limitation of this account state @real-email", async ({ page }) => {
+    test("2.3 REAL FINDING: Integrations, on the exact same lapsed account, correctly IS gated — confirming Teams' lack of gating is a real gap, not a universal limitation of this account state @real-email", async ({
+      page,
+    }) => {
       await page.goto(`${BASE_URL}/company`);
       await expect(
         page.getByText('Integrations are only available with a Job Link Pro or a Job Link Pro + Invoicing Subscription.', { exact: true })
@@ -380,7 +393,9 @@ test.describe('Teams Plan Gating', () => {
   });
 
   test.describe('Cross-Page Consistency on a Genuinely Lapsed Account', () => {
-    test('3.1 REAL FINDING: /company and /subscription describe the exact same lapsed state with different, inconsistent text @real-email', async ({ page }) => {
+    test('3.1 REAL FINDING: /company and /subscription describe the exact same lapsed state with different, inconsistent text @real-email', async ({
+      page,
+    }) => {
       await page.goto(`${BASE_URL}/company`);
       await expect(page.getByText('No subscription', { exact: true })).toBeVisible();
 
@@ -390,7 +405,9 @@ test.describe('Teams Plan Gating', () => {
       expect(freeCard.text).toContain('Free');
     });
 
-    test('3.2 Payment History and Payments correctly reflect the lapsed state without losing historical data @real-email', async ({ page }) => {
+    test('3.2 Payment History and Payments correctly reflect the lapsed state without losing historical data @real-email', async ({
+      page,
+    }) => {
       await page.goto(`${BASE_URL}/company`);
       await expect(page.getByText('No Payment Method', { exact: true })).toBeVisible();
 

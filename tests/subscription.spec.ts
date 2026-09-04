@@ -46,7 +46,9 @@ async function resolveStripeFrameByContent(page: Page, iframeTitle: string, expe
     }
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
-  throw new Error(`No iframe titled "${iframeTitle}" (out of ${lastCandidateCount} candidate(s)) contained a "${expectedFieldName}" textbox within ${timeoutMs}ms.`);
+  throw new Error(
+    `No iframe titled "${iframeTitle}" (out of ${lastCandidateCount} candidate(s)) contained a "${expectedFieldName}" textbox within ${timeoutMs}ms.`
+  );
 }
 
 async function billingAddressFrame(page: Page) {
@@ -63,9 +65,17 @@ async function cardElementFrame(page: Page) {
 async function fillAndSubmitResumeDialogPaymentMethod(page: Page, cardNumber: string) {
   const fieldTimeout = { timeout: 10_000 };
   const settle = () => page.waitForTimeout(400);
-  await (await billingAddressFrame(page)).getByRole('textbox', { name: 'Full name' }).pressSequentially('QA Subscription Test', fieldTimeout);
+  await (
+    await billingAddressFrame(page)
+  )
+    .getByRole('textbox', { name: 'Full name' })
+    .pressSequentially('QA Subscription Test', fieldTimeout);
   await settle();
-  await (await billingAddressFrame(page)).getByRole('textbox', { name: 'Address line 1' }).pressSequentially('123 Main Street', fieldTimeout);
+  await (
+    await billingAddressFrame(page)
+  )
+    .getByRole('textbox', { name: 'Address line 1' })
+    .pressSequentially('123 Main Street', fieldTimeout);
   await settle();
   await (await billingAddressFrame(page)).locator('#billingAddress-localityInput').pressSequentially('Quito', fieldTimeout);
   await settle();
@@ -96,7 +106,9 @@ async function cancelSubscriptionAndFinish(page: Page) {
   await page.getByRole('button', { name: 'Cancel Subscription', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Cancel Subscription', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Finish Cancellation' }).click();
-  await expect(page.getByText(/^You are currently on the .+ plan\. You will lose these features on .+ unless you resubscribe\.$/)).toBeVisible();
+  await expect(
+    page.getByText(/^You are currently on the .+ plan\. You will lose these features on .+ unless you resubscribe\.$/)
+  ).toBeVisible();
 }
 
 // --- Plan-card DOM inspection ---
@@ -196,7 +208,9 @@ test.describe('Subscription', () => {
   });
 
   test.describe('Subscription — Summary Card and Initial Trial State', () => {
-    test("1.1 /company's Subscription summary card shows the exact trial plan/date text and a working Manage Subscription link @real-email", async ({ page }) => {
+    test("1.1 /company's Subscription summary card shows the exact trial plan/date text and a working Manage Subscription link @real-email", async ({
+      page,
+    }) => {
       // 1. Land on /company with a fresh account that's never touched Subscription/Payments (done by beforeEach).
       const subscriptionCard = page.locator('.MuiCard-root').filter({ has: page.getByRole('link', { name: 'Manage Subscription' }) });
       await expect(subscriptionCard.getByText('Job Link Pro + Invoicing (Free Trial)', { exact: true })).toBeVisible();
@@ -215,7 +229,11 @@ test.describe('Subscription', () => {
       // 1. On a fresh trial account, navigate to /subscription directly and
       // inspect the status banner text above the plan cards.
       await page.goto(`${BASE_URL}/subscription`);
-      await expect(page.getByText(/^You're currently on a Free trial for Job Link Pro \+ Invoicing\. Your free trial ends at \d{1,2}\/\d{1,2}\/\d{4}\.$/)).toBeVisible();
+      await expect(
+        page.getByText(
+          /^You're currently on a Free trial for Job Link Pro \+ Invoicing\. Your free trial ends at \d{1,2}\/\d{1,2}\/\d{4}\.$/
+        )
+      ).toBeVisible();
 
       // 2. Inspect the three plan cards' headings, prices, and full feature
       // bullet lists.
@@ -264,7 +282,9 @@ test.describe('Subscription', () => {
   });
 
   test.describe('Subscription — Plan Card Selection Behavior', () => {
-    test('2.1 Selecting Job Link Pro moves the highlighted/selected state away from Job Link Pro + Invoicing, and Continue stays enabled @real-email', async ({ page }) => {
+    test('2.1 Selecting Job Link Pro moves the highlighted/selected state away from Job Link Pro + Invoicing, and Continue stays enabled @real-email', async ({
+      page,
+    }) => {
       // 1. On a fresh trial account's /subscription page (Job Link Pro +
       // Invoicing highlighted by default per 1.2), click 'Job Link Pro'.
       await page.goto(`${BASE_URL}/subscription`);
@@ -276,7 +296,9 @@ test.describe('Subscription', () => {
       await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeEnabled();
     });
 
-    test('2.2 Selecting a plan is a toggle strictly between the two PAID cards — Free never participates in the selection state @real-email', async ({ page }) => {
+    test('2.2 Selecting a plan is a toggle strictly between the two PAID cards — Free never participates in the selection state @real-email', async ({
+      page,
+    }) => {
       // 1. Re-establish Job Link Pro selected (a fresh load resets it, see selectPlanAndContinue()), then Pro + Invoicing, then Free.
       await page.goto(`${BASE_URL}/subscription`);
       await clickPlanCard(page, 'Job Link Pro');
@@ -295,7 +317,9 @@ test.describe('Subscription', () => {
   });
 
   test.describe('Subscription — Monthly/Yearly Toggle and the Review Purchase Dialog', () => {
-    test("3.1 Toggling Yearly updates both paid cards' displayed prices to their annual equivalents while preserving the current plan selection @real-email", async ({ page }) => {
+    test("3.1 Toggling Yearly updates both paid cards' displayed prices to their annual equivalents while preserving the current plan selection @real-email", async ({
+      page,
+    }) => {
       // 1. With 'Job Link Pro' selected and the toggle on its default
       // 'Monthly' state, click the 'Yearly' toggle button.
       await page.goto(`${BASE_URL}/subscription`);
@@ -309,7 +333,9 @@ test.describe('Subscription', () => {
       expect(pro.selected).toBe(true);
     });
 
-    test('3.2 The Review Purchase dialog reflects the currently-toggled interval real price, not a static Monthly-only quote @real-email', async ({ page }) => {
+    test('3.2 The Review Purchase dialog reflects the currently-toggled interval real price, not a static Monthly-only quote @real-email', async ({
+      page,
+    }) => {
       // 1. With 'Job Link Pro' selected and the toggle on 'Yearly' (redoing
       // 3.1's setup), click 'Continue'.
       await page.goto(`${BASE_URL}/subscription`);
@@ -346,7 +372,9 @@ test.describe('Subscription', () => {
   });
 
   test.describe('Subscription — Full Successful Purchase via Real Stripe Checkout', () => {
-    test("4.1 'Confirm and Pay' navigates to a real, externally-hosted Stripe Checkout Sandbox page reflecting the selected plan and Monthly price @real-email", async ({ page }) => {
+    test("4.1 'Confirm and Pay' navigates to a real, externally-hosted Stripe Checkout Sandbox page reflecting the selected plan and Monthly price @real-email", async ({
+      page,
+    }) => {
       // 1. Reach Checkout WITHOUT completing the purchase - 4.2 is the real, one-shot purchase that consumes this account's only fresh window.
       test.slow();
       await page.goto(`${BASE_URL}/subscription`);
@@ -405,13 +433,19 @@ test.describe('Subscription', () => {
 
       await expect(page).toHaveURL(/\/subscription\?success=true/, { timeout: 45_000 });
       await expect(page.getByText('Your subscription has been successfully activated!', { exact: true })).toBeVisible();
-      await expect(page.getByText(/^You are currently subscribed to the Job Link Pro \(Monthly\) plan\. Your next subscription will be billed on .+\.$/)).toBeVisible();
+      await expect(
+        page.getByText(
+          /^You are currently subscribed to the Job Link Pro \(Monthly\) plan\. Your next subscription will be billed on .+\.$/
+        )
+      ).toBeVisible();
       await expect(page.getByText('Currently Subscribed!', { exact: true })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeDisabled();
       await expect(page.getByRole('button', { name: 'Cancel Subscription', exact: true })).toBeVisible();
     });
 
-    test('4.3 The purchase side effects on /payments and /company are consistent and correctly cross-linked @real-email', async ({ page }) => {
+    test('4.3 The purchase side effects on /payments and /company are consistent and correctly cross-linked @real-email', async ({
+      page,
+    }) => {
       // 1. Navigate to /payments and inspect 'Current Payment Method'.
       await page.goto(`${BASE_URL}/payments`);
       await expect(page.getByText('**** **** **** 4242', { exact: true }).first()).toBeVisible();
@@ -453,7 +487,9 @@ test.describe('Subscription', () => {
       await expect(page.getByText('($17.00)', { exact: true })).toBeVisible();
     });
 
-    test('5.2 Confirming the upgrade processes IMMEDIATELY IN-APP with no Stripe Checkout redirect, using the already-saved card @real-email', async ({ page }) => {
+    test('5.2 Confirming the upgrade processes IMMEDIATELY IN-APP with no Stripe Checkout redirect, using the already-saved card @real-email', async ({
+      page,
+    }) => {
       test.slow();
       // 1. Redo 5.1's setup to reach the 'Update Subscription' dialog, then
       // click 'Confirm and Pay'.
@@ -465,7 +501,9 @@ test.describe('Subscription', () => {
       // The browser NEVER navigates away from this app - confirmed via URL
       // inspection, no checkout.stripe.com navigation occurs.
       await expect(page).toHaveURL(/\/subscription\?success=update/, { timeout: 30_000 });
-      await expect(page.getByText(/^You will now be subscribed to the Job Link Pro \+ Invoicing \(month\) plan starting .+\.$/)).toBeVisible();
+      await expect(
+        page.getByText(/^You will now be subscribed to the Job Link Pro \+ Invoicing \(month\) plan starting .+\.$/)
+      ).toBeVisible();
       await expect(page.getByText(/^You are currently subscribed to the Job Link Pro \+ Invoicing \(Monthly\) plan/)).toBeVisible();
       await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeDisabled();
       // 'Currently Subscribed!' lives outside getPlanCardState()'s own DOM subtree - checked directly here instead.
@@ -502,7 +540,9 @@ test.describe('Subscription', () => {
   });
 
   test.describe('Subscription — Free Plan Remains Non-Selectable on Any Active Paid Subscription', () => {
-    test('6.1 Clicking the Free plan card while actively subscribed to a paid plan produces zero reaction, identical to the trial-state finding @real-email', async ({ page }) => {
+    test('6.1 Clicking the Free plan card while actively subscribed to a paid plan produces zero reaction, identical to the trial-state finding @real-email', async ({
+      page,
+    }) => {
       // 1. With Job Link Pro actively subscribed (a real paid subscription,
       // not a trial, from Suite 5), click the 'Job Link' (Free) plan card.
       await page.goto(`${BASE_URL}/subscription`);
@@ -531,17 +571,27 @@ test.describe('Subscription', () => {
 
       await expect(page.getByRole('heading', { name: 'Cancel Subscription', exact: true })).toBeVisible();
       await expect(
-        page.getByText("Removing your payment method will cancel your Job Link subscription. Click 'Finish Cancellation' below to cancel your subscription.", { exact: true })
+        page.getByText(
+          "Removing your payment method will cancel your Job Link subscription. Click 'Finish Cancellation' below to cancel your subscription.",
+          { exact: true }
+        )
       ).toBeVisible();
       await expect(page.getByText(/^Cancellation will be effective at the end of your current billing period as of .+\.$/)).toBeVisible();
-      await expect(page.getByText('Continue to use all the powerful features of your subscription until cancellation is effective on the date above.', { exact: true })).toBeVisible();
+      await expect(
+        page.getByText(
+          'Continue to use all the powerful features of your subscription until cancellation is effective on the date above.',
+          { exact: true }
+        )
+      ).toBeVisible();
       await expect(page.getByText('Restart your subscription anytime.', { exact: true })).toBeVisible();
       await expect(page.getByText('Reach out to Job Link support for more information.', { exact: true })).toBeVisible();
       await expect(page.getByRole('button', { name: 'No, go back' })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Finish Cancellation' })).toBeVisible();
     });
 
-    test("7.2 'No, go back' cancels cleanly — payment method and subscription both remain completely unchanged @real-email", async ({ page }) => {
+    test("7.2 'No, go back' cancels cleanly — payment method and subscription both remain completely unchanged @real-email", async ({
+      page,
+    }) => {
       // 1. Redo 7.1's setup to reopen the dialog, then click 'No, go back'.
       await page.goto(`${BASE_URL}/subscription`);
       await page.getByRole('button', { name: 'Cancel Subscription', exact: true }).click();
@@ -571,7 +621,11 @@ test.describe('Subscription', () => {
       await expect(page.getByRole('heading', { name: 'No Payment Method', exact: true })).toBeVisible();
 
       await page.goto(`${BASE_URL}/subscription`);
-      await expect(page.getByText(/^You are currently on the Job Link Pro \(Monthly\) plan\. You will lose these features on .+ unless you resubscribe\.$/)).toBeVisible();
+      await expect(
+        page.getByText(
+          /^You are currently on the Job Link Pro \(Monthly\) plan\. You will lose these features on .+ unless you resubscribe\.$/
+        )
+      ).toBeVisible();
       // See 5.2's comment above for why this is a page-level check, not
       // via getPlanCardState()'s own extracted .text.
       await expect(page.getByText('Currently Subscribed!', { exact: true })).toBeVisible();
@@ -610,7 +664,9 @@ test.describe('Subscription', () => {
       await page.getByRole('button', { name: 'Resume Subscription', exact: true }).click();
 
       await expect(page.getByRole('heading', { name: 'Payment Method', exact: true })).toBeVisible();
-      await expect(page.getByText('In order to resume your subscription please update your credit card information.', { exact: true })).toBeVisible();
+      await expect(
+        page.getByText('In order to resume your subscription please update your credit card information.', { exact: true })
+      ).toBeVisible();
       // Wrapped in toPass() to re-resolve from scratch on each retry - the
       // resolved iframe can still get swapped for a new instance in the gap before this assertion reads it (see CLAUDE.md).
       await expect(async () => {
@@ -622,7 +678,9 @@ test.describe('Subscription', () => {
       await expect(page.getByRole('button', { name: 'Update Payment Method' })).toBeDisabled();
     });
 
-    test('7.6 Submitting the Resume dialog with a valid test card (4242...) genuinely resumes the subscription end-to-end @real-email', async ({ page }) => {
+    test('7.6 Submitting the Resume dialog with a valid test card (4242...) genuinely resumes the subscription end-to-end @real-email', async ({
+      page,
+    }) => {
       test.setTimeout(210_000); // room for the toPass() retry loop below, beyond one full attempt
       // 1. Redo 7.5's setup, fill the form with a valid card via real
       // keystrokes, check the checkbox, submit. Wrapped in a retry - the
@@ -637,7 +695,11 @@ test.describe('Subscription', () => {
       }).toPass({ timeout: 150_000 });
 
       await expect(page.getByText('You have resumed your Job Link Pro (month) plan.', { exact: true })).toBeVisible();
-      await expect(page.getByText(/^You are currently subscribed to the Job Link Pro \(Monthly\) plan\. Your next subscription will be billed on .+\.$/)).toBeVisible();
+      await expect(
+        page.getByText(
+          /^You are currently subscribed to the Job Link Pro \(Monthly\) plan\. Your next subscription will be billed on .+\.$/
+        )
+      ).toBeVisible();
       await expect(page.getByRole('button', { name: 'Cancel Subscription', exact: true })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Resume Subscription', exact: true })).toHaveCount(0);
 
@@ -676,7 +738,11 @@ test.describe('Subscription', () => {
 
       await expect(page.getByRole('heading', { name: 'Payment Method', exact: true })).toBeVisible();
       await expect((await cardElementFrame(page)).getByRole('textbox', { name: 'Card number' })).toHaveValue('4000 0000 0000 0002');
-      await expect(page.getByText(/^You are currently on the Job Link Pro \(Monthly\) plan\. You will lose these features on .+ unless you resubscribe\.$/)).toBeVisible();
+      await expect(
+        page.getByText(
+          /^You are currently on the Job Link Pro \(Monthly\) plan\. You will lose these features on .+ unless you resubscribe\.$/
+        )
+      ).toBeVisible();
     });
 
     test('7.8 3D Secure flow (4000 0025 0000 3155) in the Resume Subscription dialog shows the real Stripe-hosted challenge, and completing it resumes the subscription successfully @real-email', async ({
@@ -709,7 +775,9 @@ test.describe('Subscription', () => {
   });
 
   test.describe('Subscription — Edge Cases: Refresh Mid-Dialog, Rapid Double-Click, and Interval-Toggle-Without-Reselecting', () => {
-    test('8.1 Refreshing /subscription while the Update Subscription dialog is open is completely safe — no partial state, no stuck dialog @real-email', async ({ page }) => {
+    test('8.1 Refreshing /subscription while the Update Subscription dialog is open is completely safe — no partial state, no stuck dialog @real-email', async ({
+      page,
+    }) => {
       // 1. Open the 'Update Subscription' dialog, then reload instead of interacting with it further.
       await page.goto(`${BASE_URL}/subscription`);
       await selectPlanAndContinue(page, 'Job Link Pro + Invoicing');
@@ -726,7 +794,9 @@ test.describe('Subscription', () => {
       await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeDisabled();
     });
 
-    test('8.2 A rapid double-click on Confirm and Pay during an in-app upgrade does not create a duplicate Payment History entry @real-email', async ({ page }) => {
+    test('8.2 A rapid double-click on Confirm and Pay during an in-app upgrade does not create a duplicate Payment History entry @real-email', async ({
+      page,
+    }) => {
       test.slow();
       // 1. Open the 'Update Subscription' dialog, then fire two clicks on 'Confirm and Pay' as close together as possible.
       await page.goto(`${BASE_URL}/subscription`);

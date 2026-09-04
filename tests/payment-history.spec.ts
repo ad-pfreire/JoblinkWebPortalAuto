@@ -95,7 +95,9 @@ async function findRowByBillingId(page: Page, billingId: string) {
 }
 
 /** Navigates to /company and returns the invoices table's first-page response body - intercepted via `page.route()` with a `handled` guard, retrying up to 3x on a non-JSON response (see CLAUDE.md). */
-async function loadCompanyAndGetFirstPageInvoices(page: Page): Promise<{ metadata: { hasMore: boolean; lastCursor?: string }; data: any[] }> {
+async function loadCompanyAndGetFirstPageInvoices(
+  page: Page
+): Promise<{ metadata: { hasMore: boolean; lastCursor?: string }; data: any[] }> {
   for (let attempt = 0; attempt < 3; attempt++) {
     let capturedBody: { metadata: { hasMore: boolean; lastCursor?: string }; data: any[] } | null = null;
     let parseFailed = false;
@@ -221,7 +223,9 @@ test.describe('Payment History', () => {
   });
 
   test.describe('Payment History — Table Structure and Empty/Populated States', () => {
-    test('1.1 A company that has never made a real purchase shows the correct, genuinely-empty Payment History state @real-email', async ({ page }) => {
+    test('1.1 A company that has never made a real purchase shows the correct, genuinely-empty Payment History state @real-email', async ({
+      page,
+    }) => {
       // 1. Log in as the shared seed account (read-only use only).
       await loginAsSeedAndGoToCompany(page);
       // 'Payment History' text matches twice (hidden mobile duplicate +
@@ -242,7 +246,9 @@ test.describe('Payment History', () => {
       expect(body).toEqual({ metadata: { hasMore: false }, data: [] });
     });
 
-    test('1.2 A company with real payment history shows correctly structured, correctly formatted rows matching the underlying Stripe invoice data @real-email', async ({ page }) => {
+    test('1.2 A company with real payment history shows correctly structured, correctly formatted rows matching the underlying Stripe invoice data @real-email', async ({
+      page,
+    }) => {
       // 1. Log in as the disposable account (real history from beforeAll).
       const body = await (async () => {
         await loginAsDisposableAndGoToCompany(page);
@@ -269,7 +275,9 @@ test.describe('Payment History', () => {
       }
     });
 
-    test('1.3 A real subscription change made on /subscription populates a new Payment History row on the very next /company load, with no manual refresh needed @real-email', async ({ page }) => {
+    test('1.3 A real subscription change made on /subscription populates a new Payment History row on the very next /company load, with no manual refresh needed @real-email', async ({
+      page,
+    }) => {
       test.slow();
       // 1. Note the current rows, then complete a real interval change.
       await loginAsDisposableAndGoToCompany(page);
@@ -294,7 +302,9 @@ test.describe('Payment History', () => {
     // if a future release wires up real sorting, these tests failing is the correct signal, not a false alarm.
     const sortableColumns = ['Status', 'Date', 'Title', 'Amount', 'Billing ID'];
     sortableColumns.forEach((column, index) => {
-      test(`2.${index + 1} LIKELY BUG: clicking the ${column} column header does not reorder rows, and its aria-sort attribute never leaves 'none' @real-email`, async ({ page }) => {
+      test(`2.${index + 1} LIKELY BUG: clicking the ${column} column header does not reorder rows, and its aria-sort attribute never leaves 'none' @real-email`, async ({
+        page,
+      }) => {
         await loginAsDisposableAndGoToCompany(page);
         const header = page.getByRole('columnheader', { name: column, exact: true });
         await expect(header).toHaveAttribute('aria-sort', 'none');
@@ -312,7 +322,9 @@ test.describe('Payment History', () => {
       });
     });
 
-    test('2.6 Zero network requests fire as a result of any sort-header click, ruling out a server-side sort as cleanly as a client-side one @real-email', async ({ page }) => {
+    test('2.6 Zero network requests fire as a result of any sort-header click, ruling out a server-side sort as cleanly as a client-side one @real-email', async ({
+      page,
+    }) => {
       await loginAsDisposableAndGoToCompany(page);
       // Waits for network idle first - this app can fire a second, delayed
       // initial-load request (see CLAUDE.md) that could otherwise land inside the observation window below and get misattributed to the clicks.
@@ -330,7 +342,9 @@ test.describe('Payment History', () => {
       expect(requestFired).toBe(false);
     });
 
-    test("2.7 The 'Invoice' column correctly has NO sort affordance at all, in clear contrast to the other five columns' broken-but-present affordance @real-email", async ({ page }) => {
+    test("2.7 The 'Invoice' column correctly has NO sort affordance at all, in clear contrast to the other five columns' broken-but-present affordance @real-email", async ({
+      page,
+    }) => {
       await loginAsDisposableAndGoToCompany(page);
       const invoiceHeader = page.getByRole('columnheader', { name: 'Invoice', exact: true });
       const amountHeader = page.getByRole('columnheader', { name: 'Amount', exact: true });
@@ -351,7 +365,9 @@ test.describe('Payment History', () => {
   });
 
   test.describe('Payment History — Pagination', () => {
-    test('3.1 The real page size is a fixed 10 rows, confirmed directly via the underlying API request query parameter @real-email', async ({ page }) => {
+    test('3.1 The real page size is a fixed 10 rows, confirmed directly via the underlying API request query parameter @real-email', async ({
+      page,
+    }) => {
       await loginAsDisposableAndGoToCompany(page);
       const responsePromise = page.waitForResponse((r) => r.url().includes('/api/stripe-invoices'));
       await page.goto(`${BASE_URL}/company`);
@@ -361,7 +377,9 @@ test.describe('Payment History', () => {
       expect(params.get('paginationModel[pageSize]')).toBe('10');
     });
 
-    test('3.2 With 10 or fewer total rows, both navigation buttons stay disabled and the footer label shows the true, exact count @real-email', async ({ page }) => {
+    test('3.2 With 10 or fewer total rows, both navigation buttons stay disabled and the footer label shows the true, exact count @real-email', async ({
+      page,
+    }) => {
       await loginAsDisposableAndGoToCompany(page);
       const body = await loadCompanyAndGetFirstPageInvoices(page);
       // Guard: this scenario only makes sense at or under the page size - asserted defensively rather than silently misreading a stale account.
@@ -371,7 +389,9 @@ test.describe('Payment History', () => {
       await expect(page.getByRole('button', { name: 'Go to next page' })).toBeDisabled();
     });
 
-    test("3.3 Crossing the 10-row boundary switches the footer to an 'estimated' total and enables 'Go to next page' for the first time @real-email", async ({ page }) => {
+    test("3.3 Crossing the 10-row boundary switches the footer to an 'estimated' total and enables 'Go to next page' for the first time @real-email", async ({
+      page,
+    }) => {
       test.slow();
       await loginAsDisposableAndGoToCompany(page);
       // Loops real interval changes until more than one page exists -
@@ -392,7 +412,9 @@ test.describe('Payment History', () => {
       await expect(page.getByRole('button', { name: 'Go to next page' })).toBeEnabled();
     });
 
-    test("3.4 Clicking 'Go to next page' correctly fetches the next cursor-based page, finalizes the exact total once the true end is reached, and correctly flips both buttons' state @real-email", async ({ page }) => {
+    test("3.4 Clicking 'Go to next page' correctly fetches the next cursor-based page, finalizes the exact total once the true end is reached, and correctly flips both buttons' state @real-email", async ({
+      page,
+    }) => {
       // Continues from the 11-row state 3.3 already established.
       await loginAsDisposableAndGoToCompany(page);
       const firstPage = await loadCompanyAndGetFirstPageInvoices(page);
@@ -429,7 +451,9 @@ test.describe('Payment History', () => {
       await expect(page.getByRole('button', { name: 'Go to next page' })).toBeDisabled();
     });
 
-    test("3.5 Clicking 'Go to previous page' returns to page 1 via a genuine fresh network re-fetch, not a client-side cache restore @real-email", async ({ page }) => {
+    test("3.5 Clicking 'Go to previous page' returns to page 1 via a genuine fresh network re-fetch, not a client-side cache restore @real-email", async ({
+      page,
+    }) => {
       // Continues from page 2 (per 3.4).
       await loginAsDisposableAndGoToCompany(page);
       await loadCompanyAndGetFirstPageInvoices(page);
@@ -445,7 +469,9 @@ test.describe('Payment History', () => {
       await expect(page.getByRole('button', { name: 'Go to next page' })).toBeEnabled();
     });
 
-    test('3.6 Pagination position is pure client-side state — it is not reflected in the URL and does not survive a genuine full-page reload @real-email', async ({ page }) => {
+    test('3.6 Pagination position is pure client-side state — it is not reflected in the URL and does not survive a genuine full-page reload @real-email', async ({
+      page,
+    }) => {
       await loginAsDisposableAndGoToCompany(page);
       await page.getByRole('button', { name: 'Go to next page' }).click();
       await expect(page.getByRole('button', { name: 'Go to previous page' })).toBeEnabled();
@@ -458,7 +484,9 @@ test.describe('Payment History', () => {
   });
 
   test.describe('Payment History — Row Ordering and Data Formatting', () => {
-    test('4.1 Rows are sorted newest-first by Date by default, on first load, with no header ever clicked @real-email', async ({ page }) => {
+    test('4.1 Rows are sorted newest-first by Date by default, on first load, with no header ever clicked @real-email', async ({
+      page,
+    }) => {
       await loginAsDisposableAndGoToCompany(page);
       const body = await loadCompanyAndGetFirstPageInvoices(page);
       const createdTimestamps = body.data.map((i: any) => i.created);
@@ -466,7 +494,9 @@ test.describe('Payment History', () => {
       expect(createdTimestamps).toEqual(sorted);
     });
 
-    test('4.2 Rows sharing the identical DISPLAYED minute are still ordered correctly by a finer-grained real underlying creation time @real-email', async ({ page }) => {
+    test('4.2 Rows sharing the identical DISPLAYED minute are still ordered correctly by a finer-grained real underlying creation time @real-email', async ({
+      page,
+    }) => {
       await loginAsDisposableAndGoToCompany(page);
       const body = await loadCompanyAndGetFirstPageInvoices(page);
       // Groups by the DISPLAYED minute (matching the Date cell's formatting), not the raw second-precision 'created' value.
@@ -482,11 +512,15 @@ test.describe('Payment History', () => {
       const [later, earlier] = [...tie].sort((a, b) => b.created - a.created);
       const rows = paymentHistoryDataRows(page);
       const laterIndex = await rows.filter({ hasText: later.number }).evaluate((el) => Array.from(el.parentElement!.children).indexOf(el));
-      const earlierIndex = await rows.filter({ hasText: earlier.number }).evaluate((el) => Array.from(el.parentElement!.children).indexOf(el));
+      const earlierIndex = await rows
+        .filter({ hasText: earlier.number })
+        .evaluate((el) => Array.from(el.parentElement!.children).indexOf(el));
       expect(laterIndex).toBeLessThan(earlierIndex);
     });
 
-    test('4.3 A negative-amount (credit/proration) row renders correctly with a leading minus sign, and still shows Status Paid rather than a distinct credit-specific status @real-email', async ({ page }) => {
+    test('4.3 A negative-amount (credit/proration) row renders correctly with a leading minus sign, and still shows Status Paid rather than a distinct credit-specific status @real-email', async ({
+      page,
+    }) => {
       await loginAsDisposableAndGoToCompany(page);
       const body = await loadCompanyAndGetFirstPageInvoices(page);
       const creditInvoice = body.data.find((i: any) => i.total < 0);
@@ -498,7 +532,9 @@ test.describe('Payment History', () => {
       await expect(row.getByRole('gridcell').nth(0)).toHaveText('Paid');
     });
 
-    test('4.4 An invoice with multiple Stripe line items only surfaces the FIRST line\'s description as Title @real-email', async ({ page }) => {
+    test("4.4 An invoice with multiple Stripe line items only surfaces the FIRST line's description as Title @real-email", async ({
+      page,
+    }) => {
       await loginAsDisposableAndGoToCompany(page);
       const body = await loadCompanyAndGetFirstPageInvoices(page);
       // Every real interval-change invoice here has exactly 2 line items - a
@@ -506,7 +542,7 @@ test.describe('Payment History', () => {
       // (Stripe never generates a description for that one, see 7.2). Only
       // needs >= 2 lines, not a described second line specifically, to prove the same underlying rule.
       const multiLineInvoice = body.data.find((i: any) => (i.lines?.data?.length ?? 0) >= 2);
-      expect(multiLineInvoice, 'expected at least one of beforeAll\'s real interval-change invoices to carry 2 line items').toBeTruthy();
+      expect(multiLineInvoice, "expected at least one of beforeAll's real interval-change invoices to carry 2 line items").toBeTruthy();
 
       const row = paymentHistoryDataRows(page).filter({ hasText: multiLineInvoice.number });
       const titleText = await row.getByRole('gridcell').nth(2).textContent();
@@ -526,7 +562,9 @@ test.describe('Payment History', () => {
       await expect(row.getByRole('gridcell').nth(3)).toHaveText(expectedAmount);
     });
 
-    test('4.5 A long Title value truncates gracefully with a CSS ellipsis and remains fully readable via a native hover tooltip @real-email', async ({ page }) => {
+    test('4.5 A long Title value truncates gracefully with a CSS ellipsis and remains fully readable via a native hover tooltip @real-email', async ({
+      page,
+    }) => {
       await loginAsDisposableAndGoToCompany(page);
       const body = await loadCompanyAndGetFirstPageInvoices(page);
       const withDescription = body.data.find((i: any) => (i.lines?.data?.[0]?.description ?? '').length > 40);
@@ -551,7 +589,10 @@ test.describe('Payment History', () => {
   });
 
   test.describe('Payment History — Invoice Links (basic link behavior, not content)', () => {
-    test('5.1 An Invoice link points to a real, resolvable Stripe-hosted PDF, opens in a new tab, with safe rel attributes @real-email', async ({ page, request }) => {
+    test('5.1 An Invoice link points to a real, resolvable Stripe-hosted PDF, opens in a new tab, with safe rel attributes @real-email', async ({
+      page,
+      request,
+    }) => {
       await loginAsDisposableAndGoToCompany(page);
       const link = paymentHistoryDataRows(page).first().getByRole('link');
       const href = await link.getAttribute('href');
@@ -590,7 +631,9 @@ test.describe('Payment History', () => {
   });
 
   test.describe('Payment History — Cross-Verification Against Stripe API, Real PDF Content, and MongoDB', () => {
-    test("7.1 Every invoice the app's table shows matches Stripe's own API exactly, field-for-field, when queried independently @real-email", async ({ page }) => {
+    test("7.1 Every invoice the app's table shows matches Stripe's own API exactly, field-for-field, when queried independently @real-email", async ({
+      page,
+    }) => {
       await loginAsDisposableAndGoToCompany(page);
       const appBody = await loadCompanyAndGetFirstPageInvoices(page);
 
@@ -609,7 +652,9 @@ test.describe('Payment History', () => {
       }
     });
 
-    test('7.2 CLARIFICATION, confirmed via Stripe raw data: the Title column synthesizes its own text when the real line description is null, rather than always proxying it verbatim @real-email', async ({ page }) => {
+    test('7.2 CLARIFICATION, confirmed via Stripe raw data: the Title column synthesizes its own text when the real line description is null, rather than always proxying it verbatim @real-email', async ({
+      page,
+    }) => {
       await loginAsDisposableAndGoToCompany(page);
       const customerId = await stripeFindCustomerByEmail(disposableEmail);
       const stripeResult = await stripeRequest('GET', `/invoices?customer=${customerId}&limit=100`);
@@ -617,7 +662,7 @@ test.describe('Payment History', () => {
       // Stripe description - only a proration "invoiceitem" line does - so
       // the account's very first purchase invoice always has a null one.
       const nullDescriptionInvoice = stripeResult.data.find((i: any) => i.lines?.data?.[0]?.description === null);
-      expect(nullDescriptionInvoice, 'expected beforeAll\'s initial purchase invoice to have a null Stripe line description').toBeTruthy();
+      expect(nullDescriptionInvoice, "expected beforeAll's initial purchase invoice to have a null Stripe line description").toBeTruthy();
 
       // This is the account's oldest invoice, fallen onto page 2 by now (see findRowByBillingId()).
       const row = await findRowByBillingId(page, nullDescriptionInvoice.number);
@@ -628,7 +673,9 @@ test.describe('Payment History', () => {
       expect(titleText).toContain(nullDescriptionInvoice.lines.data[0].plan.name);
     });
 
-    test('7.3 A downloaded Invoice PDF\'s own content matches the table and Stripe\'s API exactly, for a normal positive-amount invoice @real-email', async ({ page }) => {
+    test("7.3 A downloaded Invoice PDF's own content matches the table and Stripe's API exactly, for a normal positive-amount invoice @real-email", async ({
+      page,
+    }) => {
       test.slow();
       await loginAsDisposableAndGoToCompany(page);
       const body = await loadCompanyAndGetFirstPageInvoices(page);
@@ -645,7 +692,9 @@ test.describe('Payment History', () => {
       expect(pdfText).toContain(expectedTotal);
     });
 
-    test("7.4 NEW FINDING: a credit invoice's downloaded PDF shows no negative sign anywhere, unlike the table's own negative Amount @real-email", async ({ page }) => {
+    test("7.4 NEW FINDING: a credit invoice's downloaded PDF shows no negative sign anywhere, unlike the table's own negative Amount @real-email", async ({
+      page,
+    }) => {
       test.slow();
       await loginAsDisposableAndGoToCompany(page);
       const body = await loadCompanyAndGetFirstPageInvoices(page);
@@ -663,7 +712,7 @@ test.describe('Payment History', () => {
       expect(pdfText).toContain('Applied balance');
     });
 
-    test('7.5 MongoDB holds no local record of this table\'s data whatsoever @real-email', async ({ page }) => {
+    test("7.5 MongoDB holds no local record of this table's data whatsoever @real-email", async ({ page }) => {
       test.setTimeout(120_000); // scoped to 2 specific collections (see CLAUDE.md - a full database sweep is too slow to depend on)
 
       await loginAsDisposableAndGoToCompany(page);

@@ -236,7 +236,10 @@ test.describe('Reset Password page - additional behaviors', () => {
 test.describe('Full end-to-end password reset (real email, real code)', () => {
   test.describe.configure({ retries: 1 });
 
-  test('should complete a real reset with the emailed code and allow login with the new password @real-email', async ({ page, browserName }) => {
+  test('should complete a real reset with the emailed code and allow login with the new password @real-email', async ({
+    page,
+    browserName,
+  }) => {
     // Backend-only flow; runs once to avoid tripling load on the real email
     // pipeline (same rationale as account-registration.spec.ts).
     test.skip(browserName !== 'chromium', 'Backend-only flow; runs once to avoid tripling load on the real email pipeline.');

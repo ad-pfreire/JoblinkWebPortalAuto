@@ -19,7 +19,9 @@ export function generateEmailAlias(suffix: string) {
  */
 export function generateUniqueEmailAlias() {
   const timePart = Date.now().toString(36).slice(-6); // 6 chars, cycles every ~25 days
-  const randomPart = Math.floor(Math.random() * 1296).toString(36).padStart(2, '0'); // 2 chars
+  const randomPart = Math.floor(Math.random() * 1296)
+    .toString(36)
+    .padStart(2, '0'); // 2 chars
   const uniqueToken = `${TEST_ALIAS_PREFIX.slice(0, 2)}${timePart}${randomPart}`; // 10 chars total
   return generateEmailAlias(uniqueToken);
 }
@@ -73,9 +75,8 @@ export async function selectPhoneCountry(page: Page, phoneInput: Locator, countr
   const countryCombobox = phoneInput.locator('xpath=..').getByRole('combobox');
   await countryCombobox.click();
   await page.evaluate((name: string) => {
-    const option = Array.from(document.querySelectorAll('[role="option"]')).find((el) =>
-      el.textContent?.includes(name),
-    ) as HTMLElement | undefined;
+    const option = Array.from(document.querySelectorAll('[role="option"]')).find((el) => el.textContent?.includes(name)) as
+      HTMLElement | undefined;
     option?.click();
   }, countryName);
 }

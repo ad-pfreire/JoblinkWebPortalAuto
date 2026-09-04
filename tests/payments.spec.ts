@@ -49,7 +49,9 @@ async function resolveStripeFrameByContent(page: Page, iframeTitle: string, expe
     }
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
-  throw new Error(`No iframe titled "${iframeTitle}" (out of ${lastCandidateCount} candidate(s)) contained a "${expectedFieldName}" textbox within ${timeoutMs}ms.`);
+  throw new Error(
+    `No iframe titled "${iframeTitle}" (out of ${lastCandidateCount} candidate(s)) contained a "${expectedFieldName}" textbox within ${timeoutMs}ms.`
+  );
 }
 
 /** Resolves the Billing Address iframe (probes 'Full name'), also waiting for Address line 1's id to attach (CI-only mount gap, see CLAUDE.md). */
@@ -209,7 +211,9 @@ test.describe('Payments', () => {
   });
 
   test.describe('Payments — Summary Card (/company)', () => {
-    test("1.1 Fresh company shows 'No Payment Method' on the summary card with a working 'Manage Payments' link to /payments @real-email", async ({ page }) => {
+    test("1.1 Fresh company shows 'No Payment Method' on the summary card with a working 'Manage Payments' link to /payments @real-email", async ({
+      page,
+    }) => {
       // 1. Start from a fresh company that has never had a payment method (done by beforeEach).
       const card = paymentsSummaryCard(page);
 
@@ -245,7 +249,9 @@ test.describe('Payments', () => {
       await expect(page.getByText('Billing Address', { exact: true })).toBeVisible();
     });
 
-    test("1.2 After a payment method is saved, the summary card's masked card and expiry exactly match /payments' 'Current Payment Method' block @real-email", async ({ page }) => {
+    test("1.2 After a payment method is saved, the summary card's masked card and expiry exactly match /payments' 'Current Payment Method' block @real-email", async ({
+      page,
+    }) => {
       // Real, multi-iframe Stripe Elements interaction plus a genuine
       // SetupIntent confirmation - exceeds the default 30s test timeout.
       test.slow();
@@ -338,7 +344,9 @@ test.describe('Payments', () => {
       expect(await rewardsCard.innerText()).toBe('Rewards & Balances\nRedeem Coupon');
     });
 
-    test("2.2 Country defaults to 'Ecuador' on every fresh page load, with a plain (non-autocomplete) Address field and no State/Province field at that default @real-email", async ({ page }) => {
+    test("2.2 Country defaults to 'Ecuador' on every fresh page load, with a plain (non-autocomplete) Address field and no State/Province field at that default @real-email", async ({
+      page,
+    }) => {
       // 1. On a fresh /payments load, before touching the Country dropdown.
       await page.goto(`${BASE_URL}/payments`);
       const addressFrame = await billingAddressFrame(page);
@@ -356,7 +364,9 @@ test.describe('Payments', () => {
       await expect(addressFrame.getByText('Province', { exact: true })).toHaveCount(0);
     });
 
-    test("2.3 Selecting 'United States' reshapes the Billing Address form: Address becomes an autocomplete combobox, adds a 'State' dropdown, and relabels 'Postal code' to 'ZIP code' @real-email", async ({ page }) => {
+    test("2.3 Selecting 'United States' reshapes the Billing Address form: Address becomes an autocomplete combobox, adds a 'State' dropdown, and relabels 'Postal code' to 'ZIP code' @real-email", async ({
+      page,
+    }) => {
       // 1. Select 'United States' - never types into Address nor waits for
       // Google Places (separately flaky), since this only checks Stripe's own re-render.
       await page.goto(`${BASE_URL}/payments`);
@@ -377,7 +387,9 @@ test.describe('Payments', () => {
       await expect(addressFrame.getByText('City', { exact: true })).toBeVisible();
     });
 
-    test("2.4 Selecting 'Canada' reshapes the form differently from United States: adds a 'Province' dropdown (not 'State') and does NOT relabel the postal field @real-email", async ({ page }) => {
+    test("2.4 Selecting 'Canada' reshapes the form differently from United States: adds a 'Province' dropdown (not 'State') and does NOT relabel the postal field @real-email", async ({
+      page,
+    }) => {
       // 1. On a fresh /payments load, select 'Canada' from the 'Country or
       // region' dropdown.
       await page.goto(`${BASE_URL}/payments`);
@@ -416,7 +428,9 @@ test.describe('Payments', () => {
       await expect(addressFrame.getByText('Postal code', { exact: true })).toBeVisible();
     });
 
-    test('2.6 Auth guard: accessing /payments directly while logged out redirects to /login with a redirectUrl, and logging in from that state lands back on /payments @real-email', async ({ page }) => {
+    test('2.6 Auth guard: accessing /payments directly while logged out redirects to /login with a redirectUrl, and logging in from that state lands back on /payments @real-email', async ({
+      page,
+    }) => {
       // 1. Log out via the account menu.
       await page.getByRole('button', { name: 'account of current user' }).click();
       await page.getByRole('menuitem', { name: 'Log Out' }).click();
@@ -439,7 +453,9 @@ test.describe('Payments', () => {
   // at which point these 4 no-op tests need to be rewritten entirely as real
   // success/error-path coverage (see the TODO on 3.4 below).
   test.describe.skip('Payments — Rewards & Balances / Coupon Code', () => {
-    test("3.1 Entering a realistic-looking coupon code and clicking 'Redeem Coupon' fires zero network requests and shows no success/error message (expected — feature not yet enabled) @real-email", async ({ page }) => {
+    test("3.1 Entering a realistic-looking coupon code and clicking 'Redeem Coupon' fires zero network requests and shows no success/error message (expected — feature not yet enabled) @real-email", async ({
+      page,
+    }) => {
       // 1. Type a plausible coupon code and click 'Redeem Coupon' - not wired up yet, so this documents the no-op behavior.
       // Waits for the page's own create-setup-intent request first, so it
       // doesn't land inside the tracking window below (not networkidle - this page never goes fully idle).
@@ -486,7 +502,9 @@ test.describe('Payments', () => {
       await expect(page.getByRole('alert')).toHaveText('');
     });
 
-    test('3.3 A very long Coupon Code value (128 characters) is accepted with no truncation, and still produces the same no-op behavior on click @real-email', async ({ page }) => {
+    test('3.3 A very long Coupon Code value (128 characters) is accepted with no truncation, and still produces the same no-op behavior on click @real-email', async ({
+      page,
+    }) => {
       // 1. Type a 128-character repeating string (see 3.1 for the setup-intent wait).
       const setupIntentResponsePromise = page.waitForResponse((response) => response.url().includes('/api/create-setup-intent'));
       await page.goto(`${BASE_URL}/payments`);
@@ -513,7 +531,9 @@ test.describe('Payments', () => {
       await expect(page.getByRole('alert')).toHaveText('');
     });
 
-    test("3.4 KNOWN LIMITATION: Redeem Coupon is not enabled in this release, so its success/error paths cannot be tested yet @real-email", async ({ page }) => {
+    test('3.4 KNOWN LIMITATION: Redeem Coupon is not enabled in this release, so its success/error paths cannot be tested yet @real-email', async ({
+      page,
+    }) => {
       // Consolidation test: the one untouched-field shape not covered by
       // 3.1-3.3. TODO once enabled: replace this and 3.1-3.3 with real success/error assertions.
       const setupIntentResponsePromise = page.waitForResponse((response) => response.url().includes('/api/create-setup-intent'));
@@ -536,7 +556,9 @@ test.describe('Payments', () => {
   });
 
   test.describe('Payments — Card Form Validation and the Save Payment Details Checkbox Requirement', () => {
-    test("4.1 Stripe's own real-time card validation shows specific inline error messages for incomplete/invalid Card fields @real-email", async ({ page }) => {
+    test("4.1 Stripe's own real-time card validation shows specific inline error messages for incomplete/invalid Card fields @real-email", async ({
+      page,
+    }) => {
       // 1. Type an incomplete card number, blur into 'Expiration date'.
       // Re-resolves cardElementFrame(page) fresh each time - this test is
       // slow enough for Stripe to swap the iframe mid-test (see CLAUDE.md).
@@ -554,7 +576,7 @@ test.describe('Payments', () => {
 
       // 2. Type an already-expired date directly into 'Expiration (MM/YY)'
       // (e.g. '0120' for 01/20).
-      await ((await cardElementFrame(page)).getByRole('textbox', { name: 'Expiration date' })).pressSequentially('0120');
+      await (await cardElementFrame(page)).getByRole('textbox', { name: 'Expiration date' }).pressSequentially('0120');
 
       // An inline alert appears reading exactly "Your card's expiration
       // year is in the past." - Stripe renders this with a real curly
@@ -563,7 +585,7 @@ test.describe('Payments', () => {
 
       // 3. Type a single-digit value into 'Security code' (e.g. '1') and
       // blur the field.
-      await ((await cardElementFrame(page)).getByRole('textbox', { name: 'Security code' })).pressSequentially('1');
+      await (await cardElementFrame(page)).getByRole('textbox', { name: 'Security code' }).pressSequentially('1');
       await (await cardElementFrame(page)).getByText('Card', { exact: true }).click();
 
       // Reads exactly 'Your security code is incomplete.' - genuinely omits "card's", unlike the other two alerts' wording.
@@ -618,7 +640,9 @@ test.describe('Payments', () => {
       await expect(page).toHaveURL(`${BASE_URL}/payments`);
     });
 
-    test('4.4 The same button-stays-enabled-but-blocks-on-submit pattern generalizes to other Address fields (spot-checked with City) @real-email', async ({ page }) => {
+    test('4.4 The same button-stays-enabled-but-blocks-on-submit pattern generalizes to other Address fields (spot-checked with City) @real-email', async ({
+      page,
+    }) => {
       // 1. Fill every field EXCEPT 'City', leaving it blank from the start (see 4.3 for why).
       await page.goto(`${BASE_URL}/payments`);
       await fillBillingAndCardFieldsWithoutCheckbox(page, { city: '' });
@@ -674,7 +698,9 @@ test.describe('Payments', () => {
       await expect(card.getByText('No Payment Method')).toHaveCount(0);
     });
 
-    test("4.7 A very long value in 'Address line 1' (257 characters) does not visually overflow or break the Billing Address form's layout @real-email", async ({ page }) => {
+    test("4.7 A very long value in 'Address line 1' (257 characters) does not visually overflow or break the Billing Address form's layout @real-email", async ({
+      page,
+    }) => {
       // 1. Type a 257-character value into 'Address line 1' and inspect the
       // field and surrounding form.
       await page.goto(`${BASE_URL}/payments`);
@@ -701,7 +727,7 @@ test.describe('Payments', () => {
   });
 
   test.describe('Payments — Successful Save, Decline, and 3D Secure Flows', () => {
-    test("5.1 A fully valid submission (test card 4242, valid address, checkbox checked) redirects to /company, updates the summary card, and leaves Payment History unchanged — persisting across a real reload @real-email", async ({
+    test('5.1 A fully valid submission (test card 4242, valid address, checkbox checked) redirects to /company, updates the summary card, and leaves Payment History unchanged — persisting across a real reload @real-email', async ({
       page,
     }) => {
       test.slow(); // real Stripe Elements + SetupIntent round-trip, same as test 1.2
@@ -753,7 +779,9 @@ test.describe('Payments', () => {
       await expect(page.getByRole('heading', { name: '12/2034', exact: true })).toBeVisible();
     });
 
-    test('5.2 Decline flow (test card 4000 0000 0000 0002) shows three simultaneous error surfaces and leaves the form editable for immediate retry @real-email', async ({ page }) => {
+    test('5.2 Decline flow (test card 4000 0000 0000 0002) shows three simultaneous error surfaces and leaves the form editable for immediate retry @real-email', async ({
+      page,
+    }) => {
       test.slow(); // real Stripe decline round-trip, slower than a successful confirm
 
       // 1. Fill the form fully valid except Card Number '4000000000000002' (generic decline).
@@ -792,7 +820,9 @@ test.describe('Payments', () => {
       await expect((await cardElementFrame(page)).getByRole('textbox', { name: 'Card number' })).toHaveValue('4000 0000 0000 0002');
     });
 
-    test('5.3 Incorrect-CVC decline (test card 4000 0000 0000 0127) surfaces a CVC-SPECIFIC error message, distinct from the generic decline message @real-email', async ({ page }) => {
+    test('5.3 Incorrect-CVC decline (test card 4000 0000 0000 0127) surfaces a CVC-SPECIFIC error message, distinct from the generic decline message @real-email', async ({
+      page,
+    }) => {
       test.slow(); // same real decline round-trip budget as 5.2
 
       // 1. Fill the form fully valid except Card Number '4000000000000127' (incorrect-CVC decline).
@@ -873,7 +903,9 @@ test.describe('Payments', () => {
   });
 
   test.describe('Payments — Replacing and Deleting a Payment Method', () => {
-    test("6.1 With a payment method already saved, the Billing Address/Card form still renders below 'Current Payment Method' and starts blank (does not prefill the previously-saved billing address) @real-email", async ({ page }) => {
+    test("6.1 With a payment method already saved, the Billing Address/Card form still renders below 'Current Payment Method' and starts blank (does not prefill the previously-saved billing address) @real-email", async ({
+      page,
+    }) => {
       test.slow(); // reads 9 fields across 2 Stripe iframes, each resolved fresh - adds up close to the default 30s timeout
 
       // 1. Reload /payments (Suite 5 left a saved 3D Secure test card, '...3155').
@@ -897,7 +929,9 @@ test.describe('Payments', () => {
       await expect((await cardElementFrame(page)).getByRole('textbox', { name: 'Card number' })).toHaveValue('');
       await expect((await cardElementFrame(page)).getByRole('textbox', { name: 'Expiration date' })).toHaveValue('');
       await expect((await cardElementFrame(page)).getByRole('textbox', { name: 'Security code' })).toHaveValue('');
-      await expect((await cardElementFrame(page)).getByRole('checkbox', { name: 'Save payment details for future purchases' })).not.toBeChecked();
+      await expect(
+        (await cardElementFrame(page)).getByRole('checkbox', { name: 'Save payment details for future purchases' })
+      ).not.toBeChecked();
 
       await expect(page.getByRole('button', { name: 'Update Payment Method' })).toBeDisabled();
     });
@@ -938,7 +972,9 @@ test.describe('Payments', () => {
       await expect(page.getByRole('heading', { name: '**** **** **** 3155' })).toHaveCount(0);
     });
 
-    test("6.3 'Delete Payment Method' opens a confirmation dialog with specific copy, and 'No, go back' cancels cleanly without deleting anything (no active subscription case) @real-email", async ({ page }) => {
+    test("6.3 'Delete Payment Method' opens a confirmation dialog with specific copy, and 'No, go back' cancels cleanly without deleting anything (no active subscription case) @real-email", async ({
+      page,
+    }) => {
       // 1. With a payment method saved (6.2's '...4444') and no active subscription, click 'Delete Payment Method'.
       await page.goto(`${BASE_URL}/payments`);
       const deleteButton = page.getByRole('button', { name: 'Delete Payment Method', exact: true });
@@ -954,8 +990,12 @@ test.describe('Payments', () => {
       // Subscription' variant from 6.6, since there's no active subscription yet.
       await expect(page.getByRole('heading', { name: 'Remove Payment Method', exact: true })).toBeVisible();
       await expect(page.getByText("You're about to remove your saved payment method.", { exact: true })).toBeVisible();
-      await expect(page.getByText("This will not cancel any subscription, since you don't currently have an active one.", { exact: true })).toBeVisible();
-      await expect(page.getByText("If you choose to subscribe in the future, you'll need to add a payment method again.", { exact: true })).toBeVisible();
+      await expect(
+        page.getByText("This will not cancel any subscription, since you don't currently have an active one.", { exact: true })
+      ).toBeVisible();
+      await expect(
+        page.getByText("If you choose to subscribe in the future, you'll need to add a payment method again.", { exact: true })
+      ).toBeVisible();
       await expect(page.getByText('Reach out to Job Link support for more information.', { exact: true })).toBeVisible();
       await expect(page.getByRole('button', { name: 'No, go back' })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Yes, remove' })).toBeVisible();
@@ -971,7 +1011,9 @@ test.describe('Payments', () => {
       await expect(page.getByRole('heading', { name: expiryBefore!, exact: true })).toBeVisible();
     });
 
-    test("6.4 Confirming deletion ('Yes, remove') removes the payment method and correctly reverts both /payments and the /company summary card to 'No Payment Method' @real-email", async ({ page }) => {
+    test("6.4 Confirming deletion ('Yes, remove') removes the payment method and correctly reverts both /payments and the /company summary card to 'No Payment Method' @real-email", async ({
+      page,
+    }) => {
       // Compares Payment History's row count to itself before/after - a payment-method deletion isn't a billing event.
       await page.goto(`${BASE_URL}/company`);
       const paymentHistoryRowsBefore = await paymentHistoryRowCount(page);
@@ -1001,7 +1043,9 @@ test.describe('Payments', () => {
       expect(await paymentHistoryRowCount(page)).toBe(paymentHistoryRowsBefore);
     });
 
-    test("6.5 Submitting the exact same card (same number, expiry, CVC) as the currently-saved one is accepted silently, and never leaves a duplicate Stripe PaymentMethod behind @real-email", async ({ page }) => {
+    test('6.5 Submitting the exact same card (same number, expiry, CVC) as the currently-saved one is accepted silently, and never leaves a duplicate Stripe PaymentMethod behind @real-email', async ({
+      page,
+    }) => {
       // Two real SetupIntent confirmation + backend save round-trips back
       // to back, plus two real Stripe API calls - comfortably exceeds the
       // default 30s test timeout budget on a slow-but-not-broken run.
@@ -1092,7 +1136,11 @@ test.describe('Payments', () => {
       await expect(page.getByText('Your subscription has been successfully activated!', { exact: true })).toBeVisible();
       // One sentence pair in a single text node - an exact match on just the
       // plan-name clause never matches; anchored regex handles the dynamic date.
-      await expect(page.getByText(/^You are currently subscribed to the Job Link Pro \(Monthly\) plan\. Your next subscription will be billed on .+\.$/)).toBeVisible();
+      await expect(
+        page.getByText(
+          /^You are currently subscribed to the Job Link Pro \(Monthly\) plan\. Your next subscription will be billed on .+\.$/
+        )
+      ).toBeVisible();
 
       // 2. Navigate to /payments - the button now reads 'Delete Payment
       // Method & Cancel Subscription' instead of plain 'Delete Payment Method'.
@@ -1110,11 +1158,17 @@ test.describe('Payments', () => {
       // regex since it depends on when this test runs.
       await expect(page.getByRole('heading', { name: 'Cancel Subscription', exact: true })).toBeVisible();
       await expect(
-        page.getByText("Removing your payment method will cancel your Job Link subscription. Click 'Finish Cancellation' below to cancel your subscription.", { exact: true })
+        page.getByText(
+          "Removing your payment method will cancel your Job Link subscription. Click 'Finish Cancellation' below to cancel your subscription.",
+          { exact: true }
+        )
       ).toBeVisible();
       await expect(page.getByText(/^Cancellation will be effective at the end of your current billing period as of .+\.$/)).toBeVisible();
       await expect(
-        page.getByText('Continue to use all the powerful features of your subscription until cancellation is effective on the date above.', { exact: true })
+        page.getByText(
+          'Continue to use all the powerful features of your subscription until cancellation is effective on the date above.',
+          { exact: true }
+        )
       ).toBeVisible();
       await expect(page.getByText('Restart your subscription anytime.', { exact: true })).toBeVisible();
       await expect(page.getByText('Reach out to Job Link support for more information.', { exact: true })).toBeVisible();
@@ -1122,7 +1176,9 @@ test.describe('Payments', () => {
       await expect(page.getByRole('button', { name: 'Finish Cancellation' })).toBeVisible();
     });
 
-    test("6.7 Confirming 'Finish Cancellation' removes the payment method immediately but schedules the subscription to cancel at period end, not immediately @real-email", async ({ page }) => {
+    test("6.7 Confirming 'Finish Cancellation' removes the payment method immediately but schedules the subscription to cancel at period end, not immediately @real-email", async ({
+      page,
+    }) => {
       test.slow(); // real payment-method removal + subscription-cancellation round-trip
 
       // 1. Reopens the 'Cancel Subscription' dialog itself rather than
@@ -1140,7 +1196,11 @@ test.describe('Payments', () => {
       // 2. /subscription still shows the plan active - 'Currently
       // Subscribed!' plus 'Resume Subscription' instead of 'Cancel Subscription'.
       await page.goto(`${BASE_URL}/subscription`);
-      await expect(page.getByText(/^You are currently on the Job Link Pro \(Monthly\) plan\. You will lose these features on .+ unless you resubscribe\.$/)).toBeVisible();
+      await expect(
+        page.getByText(
+          /^You are currently on the Job Link Pro \(Monthly\) plan\. You will lose these features on .+ unless you resubscribe\.$/
+        )
+      ).toBeVisible();
       await expect(page.getByText('Currently Subscribed!', { exact: true })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Resume Subscription', exact: true })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Cancel Subscription', exact: true })).toHaveCount(0);

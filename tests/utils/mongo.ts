@@ -40,7 +40,9 @@ export async function findAnyCollectionReferencing(
       collectionNames.map(async (name) => {
         const count = await db
           .collection(name)
-          .countDocuments({ $or: candidateValues.flatMap((v) => [{ user_id: v }, { userId: v }, { stripe_id: v }, { customer: v }, { provider_id: v }]) })
+          .countDocuments({
+            $or: candidateValues.flatMap((v) => [{ user_id: v }, { userId: v }, { stripe_id: v }, { customer: v }, { provider_id: v }]),
+          })
           .catch(() => 0);
         return { collection: name, count };
       })

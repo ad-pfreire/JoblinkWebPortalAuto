@@ -59,5 +59,5 @@ module.exports = tseslint.config(
       '@typescript-eslint/no-require-imports': 'off',
     },
   },
-  eslintConfigPrettier,
+  eslintConfigPrettier
 );

@@ -105,7 +105,9 @@ test.describe('Teams', () => {
   });
 
   test.describe('Teams — Navigation Structure, Default State, and Auth Guard', () => {
-    test("1.1 Fresh/isolated company's 'For You' tab shows an empty 'Members you work with' section and a default 'My Team' (Owner, 1 member) @real-email", async ({ page }) => {
+    test("1.1 Fresh/isolated company's 'For You' tab shows an empty 'Members you work with' section and a default 'My Team' (Owner, 1 member) @real-email", async ({
+      page,
+    }) => {
       // 1. Land on /company (done by beforeEach), click the 'Teams' tab.
       await page.getByRole('tab', { name: 'Teams' }).click();
 
@@ -146,7 +148,9 @@ test.describe('Teams', () => {
       await expect(page.getByRole('button', { name: /member/ })).toHaveCount(1);
     });
 
-    test("1.2 The 'Teams' sub-tab lists every team as a card under 'Teams (N)', and clicking a card navigates to a deep-linkable team detail view @real-email", async ({ page }) => {
+    test("1.2 The 'Teams' sub-tab lists every team as a card under 'Teams (N)', and clicking a card navigates to a deep-linkable team detail view @real-email", async ({
+      page,
+    }) => {
       // 1. Click the 'Teams' sub-tab (or navigate to /teams/list directly).
       await page.goto(`${BASE_URL}/teams/list`);
 
@@ -183,7 +187,9 @@ test.describe('Teams', () => {
       await expect(page.getByText('Owner', { exact: true })).toBeVisible();
     });
 
-    test("1.3 The Members sub-tab's company-wide 'Member (N)' count is a different concept from a team's own member count, and deliberately excludes the owner @real-email", async ({ page }) => {
+    test("1.3 The Members sub-tab's company-wide 'Member (N)' count is a different concept from a team's own member count, and deliberately excludes the owner @real-email", async ({
+      page,
+    }) => {
       // 1. Navigate to /teams/members (Active tab, the default).
       await page.goto(`${BASE_URL}/teams/members`);
 
@@ -201,7 +207,9 @@ test.describe('Teams', () => {
       await expect(page.getByText('Add some members to be displayed here', { exact: true })).toBeVisible();
     });
 
-    test('1.4 Auth guard: accessing any of /teams, /teams/list, /teams/members directly while logged out redirects to /login with a redirectUrl, and logging back in lands on the originally-requested page @real-email', async ({ page }) => {
+    test('1.4 Auth guard: accessing any of /teams, /teams/list, /teams/members directly while logged out redirects to /login with a redirectUrl, and logging back in lands on the originally-requested page @real-email', async ({
+      page,
+    }) => {
       // 1. While logged in, log out via the account menu (avatar -> 'Log
       // Out').
       await page.getByRole('button', { name: 'account of current user' }).click();
@@ -228,8 +236,10 @@ test.describe('Teams', () => {
     });
   });
 
-  test.describe('Teams — Default Team (\'My Team\') Detail Page', () => {
-    test("2.1 The default team's sole member row ('You' / 'Owner') has no visible remove or role-change action, and the page has NO 'Remove Team' button anywhere @real-email", async ({ page }) => {
+  test.describe("Teams — Default Team ('My Team') Detail Page", () => {
+    test("2.1 The default team's sole member row ('You' / 'Owner') has no visible remove or role-change action, and the page has NO 'Remove Team' button anywhere @real-email", async ({
+      page,
+    }) => {
       // 1. On My Team's detail page, inspect the 'You'/'Owner' row and the whole page for any delete/remove-team control.
       await page.goto(`${BASE_URL}/teams/list`);
       await teamCard(page, 'My Team').click();
@@ -247,7 +257,9 @@ test.describe('Teams', () => {
       await expect(page.getByRole('button', { name: 'Remove Team' })).toHaveCount(0);
     });
 
-    test("2.2 REAL BUG: the 'Update Team Name' modal's Name field accepts a whitespace-only value with the Update button becoming enabled and no validation shown @real-email", async ({ page }) => {
+    test("2.2 REAL BUG: the 'Update Team Name' modal's Name field accepts a whitespace-only value with the Update button becoming enabled and no validation shown @real-email", async ({
+      page,
+    }) => {
       // 1. Open 'Update Team Name', clear the pre-filled 'Name' via real Backspace keystrokes, then blur it.
       await page.goto(`${BASE_URL}/teams/list`);
       await teamCard(page, 'My Team').click();
@@ -280,7 +292,9 @@ test.describe('Teams', () => {
       await expect(page.getByRole('heading', { name: 'My Team', level: 4 })).toBeVisible();
     });
 
-    test("2.3 '+ Add Members' shows a bare 'Select' placeholder as if it were a real option, instead of a proper empty-state message, when the company has no other active members @real-email", async ({ page }) => {
+    test("2.3 '+ Add Members' shows a bare 'Select' placeholder as if it were a real option, instead of a proper empty-state message, when the company has no other active members @real-email", async ({
+      page,
+    }) => {
       // 1. Click '+ Add Members' on My Team's detail page, then open the 'Add team members' combobox's dropdown.
       await page.goto(`${BASE_URL}/teams/list`);
       await teamCard(page, 'My Team').click();
@@ -300,7 +314,9 @@ test.describe('Teams', () => {
   });
 
   test.describe('Teams — Create Team', () => {
-    test("3.1 The Create Team modal's structure: required Name, optional Add Teams Members, Create disabled until Name holds a value @real-email", async ({ page }) => {
+    test("3.1 The Create Team modal's structure: required Name, optional Add Teams Members, Create disabled until Name holds a value @real-email", async ({
+      page,
+    }) => {
       // 1. Click '+ Create Team' from any Teams sub-tab.
       await page.goto(`${BASE_URL}/teams/list`);
       await page.getByRole('button', { name: '+ Create Team' }).click();
@@ -324,7 +340,9 @@ test.describe('Teams', () => {
       await page.getByRole('button', { name: 'Cancel' }).click();
     });
 
-    test('3.2 REAL BUG: submitting Create Team with a whitespace-only Name is accepted client-side and genuinely PERSISTS a blank-looking team to the backend @real-email', async ({ page }) => {
+    test('3.2 REAL BUG: submitting Create Team with a whitespace-only Name is accepted client-side and genuinely PERSISTS a blank-looking team to the backend @real-email', async ({
+      page,
+    }) => {
       // 1. Open 'Create Team', type exactly three spaces into 'Name' via real keystrokes, leave 'Add Teams Members' empty, click 'Create'.
       await page.goto(`${BASE_URL}/teams/list`);
       await expect(page.getByRole('heading', { name: 'Teams (1)', exact: true })).toBeVisible();
@@ -367,7 +385,9 @@ test.describe('Teams', () => {
       await expect(page.getByRole('heading', { name: 'Teams (1)', exact: true })).toBeVisible();
     });
 
-    test("3.3 Creating a team with a name that exactly duplicates an existing team's name in the same company IS correctly blocked @real-email", async ({ page }) => {
+    test("3.3 Creating a team with a name that exactly duplicates an existing team's name in the same company IS correctly blocked @real-email", async ({
+      page,
+    }) => {
       // 1. Open 'Create Team' and type the exact existing name 'My Team'
       // (character-for-character) into 'Name', then click 'Create'.
       await page.goto(`${BASE_URL}/teams/list`);
@@ -394,7 +414,9 @@ test.describe('Teams', () => {
       await expect(page.getByRole('heading', { name: 'Teams (1)', exact: true })).toBeVisible();
     });
 
-    test("3.4 A successful Create Team (valid, non-blank, non-duplicate name) shows an in-modal success screen and the new team appears immediately across the UI @real-email", async ({ page }) => {
+    test('3.4 A successful Create Team (valid, non-blank, non-duplicate name) shows an in-modal success screen and the new team appears immediately across the UI @real-email', async ({
+      page,
+    }) => {
       // 1. Open 'Create Team', type a valid unique name, leave 'Add Teams Members' empty (no other candidates yet, see 2.3), click 'Create'.
       await page.goto(`${BASE_URL}/teams/list`);
       await page.getByRole('button', { name: '+ Create Team' }).click();
@@ -421,7 +443,9 @@ test.describe('Teams', () => {
   });
 
   test.describe('Teams — Non-Default Team Lifecycle: Rename and Delete', () => {
-    test("4.1 Unlike the default 'My Team', a team the user explicitly creates DOES show a 'Remove Team' button on its detail page - regardless of total team count @real-email", async ({ page }) => {
+    test("4.1 Unlike the default 'My Team', a team the user explicitly creates DOES show a 'Remove Team' button on its detail page - regardless of total team count @real-email", async ({
+      page,
+    }) => {
       // 1. Open a non-default team's detail page (e.g. 'QA Second Team', with 'My Team' still existing too).
       await page.goto(`${BASE_URL}/teams/list`);
       await expect(page.getByRole('heading', { name: 'Teams (2)', exact: true })).toBeVisible();
@@ -438,7 +462,9 @@ test.describe('Teams', () => {
       await expect(page.getByRole('button', { name: 'Remove Team' })).toHaveCount(0);
     });
 
-    test("4.2 A genuine, real 'Update Team Name' save on a non-default team persists correctly end-to-end @real-email", async ({ page }) => {
+    test("4.2 A genuine, real 'Update Team Name' save on a non-default team persists correctly end-to-end @real-email", async ({
+      page,
+    }) => {
       // 1. On a non-default team, open 'Update Team Name', replace the Name via real keystrokes, click 'Update'.
       await page.goto(`${BASE_URL}/teams/list`);
       await teamCard(page, 'QA Second Team').click();
@@ -466,7 +492,9 @@ test.describe('Teams', () => {
       await expect(page.getByRole('heading', { name: 'QA Second Team Renamed', level: 4 })).toBeVisible();
     });
 
-    test("4.3 'Remove Team' opens a dialog titled 'Delete Team' (a label inconsistency with the triggering button) with a grammar defect in its body copy, and confirming genuinely deletes the team @real-email", async ({ page }) => {
+    test("4.3 'Remove Team' opens a dialog titled 'Delete Team' (a label inconsistency with the triggering button) with a grammar defect in its body copy, and confirming genuinely deletes the team @real-email", async ({
+      page,
+    }) => {
       // 1. On a non-default team's detail page, click 'Remove Team'.
       await page.goto(`${BASE_URL}/teams/list`);
       await teamCard(page, 'QA Second Team Renamed').click();
@@ -479,7 +507,7 @@ test.describe('Teams', () => {
       // Grammar defect: missing 'be' before 'permanently deleted'. Uses a real typographic apostrophe (U+2019) in "team's", not ASCII.
       await expect(
         page.getByText(
-          "Are you sure you want to delete this team? If you choose to delete the team, all of the team’s data will permanently deleted.",
+          'Are you sure you want to delete this team? If you choose to delete the team, all of the team’s data will permanently deleted.',
           { exact: true }
         )
       ).toBeVisible();
@@ -504,7 +532,9 @@ test.describe('Teams', () => {
   });
 
   test.describe('Teams — Members Page (/teams/members): Active and Sent Invitations Tabs', () => {
-    test("5.1 A fresh/isolated company's Active tab and Sent Invitations tab each show their own distinct empty state @real-email", async ({ page }) => {
+    test("5.1 A fresh/isolated company's Active tab and Sent Invitations tab each show their own distinct empty state @real-email", async ({
+      page,
+    }) => {
       // 1. Inspect the 'Active' tab (selected by default) with no invitations sent and no accepted members.
       await page.goto(`${BASE_URL}/teams/members`);
       await expect(page.getByRole('heading', { name: 'Member (0)', exact: true })).toBeVisible();
@@ -529,7 +559,7 @@ test.describe('Teams', () => {
       await expect(page.getByRole('button', { name: 'Go to next page' })).toBeDisabled();
     });
 
-    test("5.2 Full Active-tab coverage (a real accepted member) is covered by test 6.7, not here @real-email", async () => {
+    test('5.2 Full Active-tab coverage (a real accepted member) is covered by test 6.7, not here @real-email', async () => {
       // Test 6.7 later covers the full invite -> accept -> 'Member (1)' flow
       // end-to-end - can't be verified here since this test runs before 6.7 ever creates a real accepted member (serial execution order).
       test.skip(true, "Covered by test 6.7 later in this file - see that test's own assertions on the Active tab's 'Member (1)' state.");
@@ -637,7 +667,9 @@ test.describe('Teams', () => {
       await page.getByRole('button', { name: 'Cancel' }).click();
     });
 
-    test("6.2 REAL BUG: inviting an email that already belongs to an existing active user account (e.g. the logged-in account's own email) produces a false-positive success toast but creates NO real invitation @real-email", async ({ page }) => {
+    test("6.2 REAL BUG: inviting an email that already belongs to an existing active user account (e.g. the logged-in account's own email) produces a false-positive success toast but creates NO real invitation @real-email", async ({
+      page,
+    }) => {
       // 1. Discover the logged-in account's own email from /profile (not hardcoded, see CLAUDE.md's Portability convention), then invite it.
       await page.goto(`${BASE_URL}/profile`);
       const ownEmail = await page.locator('input[name="email"]').inputValue();
@@ -664,7 +696,10 @@ test.describe('Teams', () => {
       await expect(page.getByText('0–0 of 0', { exact: true })).toBeVisible();
     });
 
-    test('6.3 A brand-new never-used email, AND an email already tied to a not-yet-verified pending registration, both create genuine invitations — and multiple emails can be invited in a single submission @real-email', async ({ page, browser }) => {
+    test('6.3 A brand-new never-used email, AND an email already tied to a not-yet-verified pending registration, both create genuine invitations — and multiple emails can be invited in a single submission @real-email', async ({
+      page,
+      browser,
+    }) => {
       test.slow(); // a real second registration + real multi-email invite round-trip
 
       // 1. Register a second disposable email and stop at the pending
@@ -709,7 +744,9 @@ test.describe('Teams', () => {
       expect(new Set(ids).size).toBe(2);
     });
 
-    test('6.4 The invite combobox client-side blocks re-inviting an email that already has a pending invitation, preventing duplicate rows @real-email', async ({ page }) => {
+    test('6.4 The invite combobox client-side blocks re-inviting an email that already has a pending invitation, preventing duplicate rows @real-email', async ({
+      page,
+    }) => {
       // 1. Chip the SAME email already pending from 6.3.
       await page.goto(`${BASE_URL}/teams/members`);
       await openInviteMemberModal(page);
@@ -725,7 +762,9 @@ test.describe('Teams', () => {
       await page.getByRole('button', { name: 'Cancel' }).click();
     });
 
-    test("6.5 'Resend' on a pending invitation shows a success toast and genuinely updates the invitation server-side — even though the UI's minute-granularity 'Date Sent' column can look visually unchanged @real-email", async ({ page }) => {
+    test("6.5 'Resend' on a pending invitation shows a success toast and genuinely updates the invitation server-side — even though the UI's minute-granularity 'Date Sent' column can look visually unchanged @real-email", async ({
+      page,
+    }) => {
       // Captures the real 'before' updatedAt via a full reload.
       const beforeResponse = await gotoSentInvitationsAndGetResponse(page);
       const beforeInvitation = beforeResponse.data.find((invitation) => invitation.email === freshEmail);
@@ -747,7 +786,9 @@ test.describe('Teams', () => {
       expect(new Date(afterInvitation!.updatedAt).getTime()).toBeGreaterThan(new Date(beforeInvitation!.updatedAt).getTime());
     });
 
-    test("6.6 'Cancel Invitation' opens a confirmation dialog, and confirming genuinely revokes the invitation @real-email", async ({ page }) => {
+    test("6.6 'Cancel Invitation' opens a confirmation dialog, and confirming genuinely revokes the invitation @real-email", async ({
+      page,
+    }) => {
       // 1. Click the unlabeled cancel-invitation icon on a pending row.
       await page.goto(`${BASE_URL}/teams/members?memberTab=sentInvitations`);
       await expect(page.getByText('1–2 of 2', { exact: true })).toBeVisible();
@@ -775,7 +816,10 @@ test.describe('Teams', () => {
       await expect(page.getByText('0–0 of 0', { exact: true })).toBeVisible();
     });
 
-    test("6.7 The full invite → real email → accept → appears as 'Active' member flow works end-to-end @real-email", async ({ page, browser }) => {
+    test("6.7 The full invite → real email → accept → appears as 'Active' member flow works end-to-end @real-email", async ({
+      page,
+      browser,
+    }) => {
       // Two separate real-email round-trips (invitation + verification) on
       // top of registration/profile UI steps comfortably exceed even
       // test.slow()'s 3x multiplier - an explicit generous timeout instead.
@@ -859,7 +903,9 @@ test.describe('Teams', () => {
   });
 
   test.describe("Teams — 'Select Teams & People' Global Search", () => {
-    test("7.1 Typing a query filters live and groups matching teams under a 'Teams' heading; selecting a result navigates directly to that team's detail page @real-email", async ({ page }) => {
+    test("7.1 Typing a query filters live and groups matching teams under a 'Teams' heading; selecting a result navigates directly to that team's detail page @real-email", async ({
+      page,
+    }) => {
       // 1. Setup: Suite 4 already deleted its own team, so create a throwaway second team here to have 2 existing at once.
       await page.goto(`${BASE_URL}/teams/list`);
       await expect(page.getByRole('heading', { name: 'Teams (1)', exact: true })).toBeVisible();
@@ -903,7 +949,9 @@ test.describe('Teams', () => {
       await expect(page.getByRole('heading', { name: 'Teams (1)', exact: true })).toBeVisible();
     });
 
-    test("7.2 The search box's 'People' grouping shows a real active company member, distinct from 'Teams' @real-email", async ({ page }) => {
+    test("7.2 The search box's 'People' grouping shows a real active company member, distinct from 'Teams' @real-email", async ({
+      page,
+    }) => {
       // 1. 6.7 already left one real Active member ('QA Automation',
       // completeProfile()'s fixed name) - search for it. Assumed to share
       // the same combobox/listbox shape as 7.1's 'Teams' grouping (never

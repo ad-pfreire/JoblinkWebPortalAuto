@@ -45,11 +45,7 @@ jobs:
       run: npm run typecheck
     - name: Lint
       run: npm run lint
-    # Informational only: the codebase predates this formatter and hasn't
-    # had a one-time reformat pass yet, so this would fail on files as
-    # they exist today. Non-blocking until that pass happens.
     - name: Format check
-      continue-on-error: true
       run: npm run format:check
     - name: Install Playwright Browsers
       run: npx playwright install --with-deps

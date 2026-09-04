@@ -59,7 +59,10 @@ test.describe('Account Registration', () => {
 test.describe('Account Registration - full flow with real email', () => {
   test.describe.configure({ retries: 1 });
 
-  test('should verify email, validate and complete the profile form, and log in after registering @real-email', async ({ page, browserName }) => {
+  test('should verify email, validate and complete the profile form, and log in after registering @real-email', async ({
+    page,
+    browserName,
+  }) => {
     // Browser-agnostic backend flow - runs once on chromium, not 3x, to avoid tripling load on the shared email pipeline.
     test.skip(browserName !== 'chromium', 'Backend-only flow; runs once to avoid tripling load on the real email pipeline.');
     test.setTimeout(240_000);

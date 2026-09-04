@@ -58,7 +58,10 @@ test.describe('Company Details', () => {
   test.describe.configure({ mode: 'serial', retries: 2 });
 
   test.beforeEach(async ({ page, browserName }) => {
-    test.skip(browserName !== 'chromium', 'Shared seed account state; runs once serially on chromium to avoid cross-project races on the same account.');
+    test.skip(
+      browserName !== 'chromium',
+      'Shared seed account state; runs once serially on chromium to avoid cross-project races on the same account.'
+    );
     await loginAsSeedAndGoToCompany(page);
   });
 
@@ -186,7 +189,7 @@ test.describe('Company Details', () => {
       await page.goto(`${BASE_URL}/company?edit=true`);
 
       await expect(page.getByRole('textbox', { name: 'Terms and Conditions' })).toHaveValue(
-        "I have the authority to order the above work and perform as outlined above. It is agreed that the seller will retain title to any equipment or material furnished until final and complete payment is made, and if settlement is not made as agreed, the seller shall have the right to remove such equipment and the seller will be held harmless for any damages resulting from the removal thereof."
+        'I have the authority to order the above work and perform as outlined above. It is agreed that the seller will retain title to any equipment or material furnished until final and complete payment is made, and if settlement is not made as agreed, the seller shall have the right to remove such equipment and the seller will be held harmless for any damages resulting from the removal thereof.'
       );
     });
 
@@ -225,7 +228,9 @@ test.describe('Company Details', () => {
       await page.goto(`${BASE_URL}/company?edit=true`);
     });
 
-    test('2.5 Office Phone Number and Mobile Phone Number have independent country-flag selectors, and neither is synced to the main Country dropdown', async ({ page }) => {
+    test('2.5 Office Phone Number and Mobile Phone Number have independent country-flag selectors, and neither is synced to the main Country dropdown', async ({
+      page,
+    }) => {
       await page.goto(`${BASE_URL}/company?edit=true`);
 
       const officePhoneFlag = phoneFieldContainer(page, 'Office Phone Number').getByRole('combobox');
@@ -266,7 +271,9 @@ test.describe('Company Details', () => {
   });
 
   test.describe('Company Details — Validation', () => {
-    test("3.1 Blurring a pristine empty required field shows 'The field is required' and keeps Save disabled (adapted)", async ({ page }) => {
+    test("3.1 Blurring a pristine empty required field shows 'The field is required' and keeps Save disabled (adapted)", async ({
+      page,
+    }) => {
       // ADAPTED: no field here is genuinely pristine-empty at load, so this
       // clears Company Name via keystrokes instead - near-identical to 3.2, which is expected.
       // 1. Clear Company Name, then blur it (click into Contractor License).
@@ -285,7 +292,9 @@ test.describe('Company Details', () => {
       await expect(companyName).toHaveValue('QA Automation Test Co');
     });
 
-    test("3.2 Clearing a previously-filled required field correctly re-triggers 'required' validation and blocks Save", async ({ page }) => {
+    test("3.2 Clearing a previously-filled required field correctly re-triggers 'required' validation and blocks Save", async ({
+      page,
+    }) => {
       // CORRECTED: the original plan claimed this silently suppressed the
       // 'required' message - re-verification found it does NOT reproduce;
       // the message appears and Save disables correctly, same as 3.1.
@@ -344,7 +353,9 @@ test.describe('Company Details', () => {
       await expect(page.getByText('Invalid email address', { exact: true })).toHaveCount(0);
     });
 
-    test('3.4 REAL BUG: Company Website has no client-side format validation at all, and a genuinely invalid value is silently rejected server-side with zero user-visible error feedback', async ({ page }) => {
+    test('3.4 REAL BUG: Company Website has no client-side format validation at all, and a genuinely invalid value is silently rejected server-side with zero user-visible error feedback', async ({
+      page,
+    }) => {
       await page.goto(`${BASE_URL}/company?edit=true`);
       const website = page.getByRole('textbox', { name: 'Company Website' });
       const contractorLicense = page.getByRole('textbox', { name: 'Contractor License' });
@@ -404,7 +415,7 @@ test.describe('Company Details', () => {
 
       // Accepted with no truncation and no inline error, unlike some other length-capped fields elsewhere in this suite.
       await expect(companyName).toHaveValue(longName);
-      expect((await companyName.inputValue())).toHaveLength(251);
+      expect(await companyName.inputValue()).toHaveLength(251);
       await expect(companyName).not.toHaveAttribute('aria-invalid', 'true');
       await expect(page.getByText('The field is required', { exact: true })).toHaveCount(0);
 
@@ -415,7 +426,9 @@ test.describe('Company Details', () => {
   });
 
   test.describe('Company Details — Save, Persistence, and Read-View Rendering', () => {
-    test('4.1 A real, valid save persists genuinely to the backend, confirmed via reload — but shows NO success toast, unlike every other save flow in this app', async ({ page }) => {
+    test('4.1 A real, valid save persists genuinely to the backend, confirmed via reload — but shows NO success toast, unlike every other save flow in this app', async ({
+      page,
+    }) => {
       await page.goto(`${BASE_URL}/company?edit=true`);
       const companyName = page.getByRole('textbox', { name: 'Company Name' });
       const contractorLicense = page.getByRole('textbox', { name: 'Contractor License' });
@@ -495,7 +508,9 @@ test.describe('Company Details', () => {
       }
     });
 
-    test("4.3 REAL BUG (corrected): the read-only card's 'Location' summary silently omits Address 2, though the Address/City segments render as two separate visual lines rather than one run-together word", async ({ page }) => {
+    test("4.3 REAL BUG (corrected): the read-only card's 'Location' summary silently omits Address 2, though the Address/City segments render as two separate visual lines rather than one run-together word", async ({
+      page,
+    }) => {
       // CORRECTED: the plan claimed Address/City run together with no space,
       // but they're two <span>s split by a real <br> - a real user sees two
       // lines (see CLAUDE.md's innerText gotcha). Address 2 IS still omitted, though - that part reproduces.
@@ -517,7 +532,9 @@ test.describe('Company Details', () => {
       expect(locationInnerText).toContain('Santa Barbara County, California, 93458, United States');
     });
 
-    test("4.4 Company Email and Phone Number are fully independent of the logged-in user's own Profile Settings identity fields", async ({ page }) => {
+    test("4.4 Company Email and Phone Number are fully independent of the logged-in user's own Profile Settings identity fields", async ({
+      page,
+    }) => {
       // 1. Capture the card's Email/Phone Number, then compare against /profile's own account-identity fields.
       const card = companyDetailsCard(page);
       const headings = card.getByRole('heading', { level: 6 });
@@ -544,7 +561,9 @@ test.describe('Company Details', () => {
       expect(companyPhoneDigits).not.toBe(profilePhoneDigits);
     });
 
-    test("4.5 REAL BUG: re-entering the edit form after a save fails to pre-fill the 'State' dropdown, even though the read-only card's Location correctly reflects the saved state", async ({ page }) => {
+    test("4.5 REAL BUG: re-entering the edit form after a save fails to pre-fill the 'State' dropdown, even though the read-only card's Location correctly reflects the saved state", async ({
+      page,
+    }) => {
       // 1. Save with State genuinely selected as 'California' first, so the backend holds it before re-entering the form.
       await page.goto(`${BASE_URL}/company?edit=true`);
       const stateCombobox = page.getByRole('combobox', { name: 'State Select' });
@@ -593,7 +612,7 @@ test.describe('Company Details', () => {
       expect(valuesAfter).toEqual(valuesBefore);
     });
 
-    test("5.2 Cancel on a dirtied edit form discards all unsaved changes cleanly", async ({ page }) => {
+    test('5.2 Cancel on a dirtied edit form discards all unsaved changes cleanly', async ({ page }) => {
       // Discovers the current value live, not hardcoded, before dirtying it.
       const card = companyDetailsCard(page);
       const originalCompanyName = (await card.getByRole('heading', { level: 6 }).first().textContent())?.trim();

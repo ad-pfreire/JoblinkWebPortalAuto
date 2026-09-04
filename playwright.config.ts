@@ -41,7 +41,12 @@ export default defineConfig({
       // needing Chromium-specific launch args - see those projects' own
       // comments for why this can't just be handled inside the files
       // themselves).
-      testIgnore: [/subscription\.spec\.ts/, /teams-plan-gating\.spec\.ts/, /account-deletion-billing\.spec\.ts/, /payment-history\.spec\.ts/],
+      testIgnore: [
+        /subscription\.spec\.ts/,
+        /teams-plan-gating\.spec\.ts/,
+        /account-deletion-billing\.spec\.ts/,
+        /payment-history\.spec\.ts/,
+      ],
       use: { ...devices['Desktop Chrome'] },
     },
 
@@ -66,9 +71,7 @@ export default defineConfig({
       testMatch: /subscription\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
-        launchOptions: process.env.CI
-          ? { args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] }
-          : {},
+        launchOptions: process.env.CI ? { args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] } : {},
       },
     },
 
@@ -81,9 +84,7 @@ export default defineConfig({
       testMatch: /teams-plan-gating\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
-        launchOptions: process.env.CI
-          ? { args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] }
-          : {},
+        launchOptions: process.env.CI ? { args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] } : {},
       },
     },
 
@@ -96,9 +97,7 @@ export default defineConfig({
       testMatch: /account-deletion-billing\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
-        launchOptions: process.env.CI
-          ? { args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] }
-          : {},
+        launchOptions: process.env.CI ? { args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] } : {},
       },
     },
 
@@ -112,21 +111,29 @@ export default defineConfig({
       testMatch: /payment-history\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
-        launchOptions: process.env.CI
-          ? { args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] }
-          : {},
+        launchOptions: process.env.CI ? { args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] } : {},
       },
     },
 
     {
       name: 'firefox',
-      testIgnore: [/subscription\.spec\.ts/, /teams-plan-gating\.spec\.ts/, /account-deletion-billing\.spec\.ts/, /payment-history\.spec\.ts/],
+      testIgnore: [
+        /subscription\.spec\.ts/,
+        /teams-plan-gating\.spec\.ts/,
+        /account-deletion-billing\.spec\.ts/,
+        /payment-history\.spec\.ts/,
+      ],
       use: { ...devices['Desktop Firefox'] },
     },
 
     {
       name: 'webkit',
-      testIgnore: [/subscription\.spec\.ts/, /teams-plan-gating\.spec\.ts/, /account-deletion-billing\.spec\.ts/, /payment-history\.spec\.ts/],
+      testIgnore: [
+        /subscription\.spec\.ts/,
+        /teams-plan-gating\.spec\.ts/,
+        /account-deletion-billing\.spec\.ts/,
+        /payment-history\.spec\.ts/,
+      ],
       use: { ...devices['Desktop Safari'] },
     },
 

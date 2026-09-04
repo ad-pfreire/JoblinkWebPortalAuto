@@ -27,7 +27,13 @@ function logoUploadCard(page: Page) {
 /** Injects a synthetic image via canvas + DataTransfer + "change" - unlike Profile Photo, no crop modal, fires the real POST immediately. */
 async function injectLogoImageFile(
   page: Page,
-  { width, height, fileName, mimeType = 'image/png', color = 'blue' }: { width: number; height: number; fileName: string; mimeType?: string; color?: string }
+  {
+    width,
+    height,
+    fileName,
+    mimeType = 'image/png',
+    color = 'blue',
+  }: { width: number; height: number; fileName: string; mimeType?: string; color?: string }
 ) {
   await page.evaluate(
     async ({ width, height, fileName, mimeType, color }) => {
@@ -88,7 +94,10 @@ async function injectTextLogoFile(page: Page, fileName: string, content: string)
 }
 
 /** Injects a file with random byte content (or 0 bytes) under a given filename/MIME type, simulating a corrupted or empty file. */
-async function injectRawBytesLogoFile(page: Page, { fileName, mimeType, byteLength = 0 }: { fileName: string; mimeType: string; byteLength?: number }) {
+async function injectRawBytesLogoFile(
+  page: Page,
+  { fileName, mimeType, byteLength = 0 }: { fileName: string; mimeType: string; byteLength?: number }
+) {
   await page.evaluate(
     ({ fileName, mimeType, byteLength }) => {
       const bytes = new Uint8Array(byteLength);
@@ -158,12 +167,17 @@ test.describe('Logo Upload', () => {
   test.describe.configure({ mode: 'serial' });
 
   test.beforeEach(async ({ page, browserName }) => {
-    test.skip(browserName !== 'chromium', 'Shared seed account state; runs once serially on chromium to avoid cross-project races on the same account.');
+    test.skip(
+      browserName !== 'chromium',
+      'Shared seed account state; runs once serially on chromium to avoid cross-project races on the same account.'
+    );
     await loginAsSeedAndGoToCompany(page);
   });
 
   test.describe('Logo Upload — Empty/Default State', () => {
-    test('1.1 Logo Upload card shows a placeholder image and expected caption/button when no logo has ever been uploaded', async ({ page }) => {
+    test('1.1 Logo Upload card shows a placeholder image and expected caption/button when no logo has ever been uploaded', async ({
+      page,
+    }) => {
       // 1. Land on /company before making any edits (done by beforeEach).
       await expect(page).toHaveTitle('Company | Job Link');
 
@@ -231,7 +245,9 @@ test.describe('Logo Upload', () => {
       await expect(page.locator('text=Your logo was uploaded successfully')).toBeVisible();
     });
 
-    test("2.2 Uploading a new logo when one already exists replaces it in place — the button remains labeled 'Upload', not 'Replace'", async ({ page }) => {
+    test("2.2 Uploading a new logo when one already exists replaces it in place — the button remains labeled 'Upload', not 'Replace'", async ({
+      page,
+    }) => {
       test.slow(); // same waitForStableImageSrc() cost as 2.1
       const card = logoUploadCard(page);
       const uploadButton = card.getByRole('button', { name: 'Upload' });
@@ -266,7 +282,9 @@ test.describe('Logo Upload', () => {
   });
 
   test.describe('Logo Upload — Size and Dimension Validation', () => {
-    test('3.1 A file over 500KB is rejected client-side with a generic combined error dialog, and no network request is sent', async ({ page }) => {
+    test('3.1 A file over 500KB is rejected client-side with a generic combined error dialog, and no network request is sent', async ({
+      page,
+    }) => {
       const cardImage = logoUploadCard(page).locator('img');
       const previousSrc = await cardImage.getAttribute('src');
 
@@ -302,7 +320,9 @@ test.describe('Logo Upload', () => {
       await expect(logoUploadCard(page).getByRole('button', { name: 'Upload' })).toBeEnabled();
     });
 
-    test('3.2 An image under 150x150px is rejected with the same generic error dialog, and the exact 150x150px boundary is confirmed live', async ({ page }) => {
+    test('3.2 An image under 150x150px is rejected with the same generic error dialog, and the exact 150x150px boundary is confirmed live', async ({
+      page,
+    }) => {
       const cardImage = logoUploadCard(page).locator('img');
       const dialogHeading = logoErrorDialogHeading(page);
 
@@ -330,7 +350,9 @@ test.describe('Logo Upload', () => {
       await expect(cardImage).toBeVisible();
     });
 
-    test("3.3 A non-image file, a fake .pdf, and a byte-corrupted 'image' all fall back to the same generic dimension/size error — the app cannot distinguish 'wrong file type' from 'too small/too large'", async ({ page }) => {
+    test("3.3 A non-image file, a fake .pdf, and a byte-corrupted 'image' all fall back to the same generic dimension/size error — the app cannot distinguish 'wrong file type' from 'too small/too large'", async ({
+      page,
+    }) => {
       const cardImage = logoUploadCard(page).locator('img');
       const previousSrc = await cardImage.getAttribute('src');
 
@@ -364,7 +386,9 @@ test.describe('Logo Upload', () => {
       await expect(cardImage).toHaveAttribute('src', previousSrc!);
     });
 
-    test('3.4 REAL BUG: an unsupported-but-valid image format (WEBP) is silently ignored with ZERO user feedback — no error, no success, no visible change at all', async ({ page }) => {
+    test('3.4 REAL BUG: an unsupported-but-valid image format (WEBP) is silently ignored with ZERO user feedback — no error, no success, no visible change at all', async ({
+      page,
+    }) => {
       const cardImage = logoUploadCard(page).locator('img');
       const previousSrc = await cardImage.getAttribute('src');
 
@@ -401,7 +425,9 @@ test.describe('Logo Upload', () => {
   });
 
   test.describe('Logo Upload — Error Dialog Behavior', () => {
-    test("4.1 Neither Escape nor clicking the backdrop closes the size/dimension error dialog — only the explicit 'Continue' button does", async ({ page }) => {
+    test("4.1 Neither Escape nor clicking the backdrop closes the size/dimension error dialog — only the explicit 'Continue' button does", async ({
+      page,
+    }) => {
       const dialogHeading = logoErrorDialogHeading(page);
 
       // 1. Trigger the error dialog, then press Escape - stays open, same pattern as the Change Password modal.

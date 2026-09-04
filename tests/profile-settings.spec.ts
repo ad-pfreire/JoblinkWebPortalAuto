@@ -52,7 +52,8 @@ async function discoverSeedBaseline(browser: import('@playwright/test').Browser)
   SEED_LAST_NAME = await page.locator('input[name="lastName"]').inputValue();
   SEED_PHONE_FORMATTED = await page.getByRole('textbox', { name: 'Phone Number' }).inputValue();
   const digitsWithCountryCode = SEED_PHONE_FORMATTED.replace(/\D/g, '');
-  SEED_PHONE_DIGITS = digitsWithCountryCode.length === 11 && digitsWithCountryCode.startsWith('1') ? digitsWithCountryCode.slice(1) : digitsWithCountryCode;
+  SEED_PHONE_DIGITS =
+    digitsWithCountryCode.length === 11 && digitsWithCountryCode.startsWith('1') ? digitsWithCountryCode.slice(1) : digitsWithCountryCode;
   await page.close();
 }
 
@@ -85,7 +86,13 @@ async function expectGenericPasswordChangeError(page: Page): Promise<Locator> {
 /** Injects a synthetic image into the hidden #profilePicture input via canvas + DataTransfer + "change" - reliably opens the crop modal like a real selection. */
 async function injectCanvasImageFile(
   page: Page,
-  { width, height, fileName, mimeType = 'image/png', color = 'blue' }: { width: number; height: number; fileName: string; mimeType?: string; color?: string }
+  {
+    width,
+    height,
+    fileName,
+    mimeType = 'image/png',
+    color = 'blue',
+  }: { width: number; height: number; fileName: string; mimeType?: string; color?: string }
 ) {
   await page.evaluate(
     async ({ width, height, fileName, mimeType, color }) => {
@@ -158,7 +165,10 @@ test.describe('Profile Settings', () => {
   });
 
   test.beforeEach(async ({ page, browserName }) => {
-    test.skip(browserName !== 'chromium', 'Shared seed account state; runs once serially on chromium to avoid cross-project races on the same account.');
+    test.skip(
+      browserName !== 'chromium',
+      'Shared seed account state; runs once serially on chromium to avoid cross-project races on the same account.'
+    );
     await loginAsSeedAndGoToProfile(page);
   });
 
@@ -523,7 +533,10 @@ test.describe('Profile Settings', () => {
       await expect(modalHeading).toBeHidden();
     });
 
-    test('should always re-encode the stored photo to a small fixed-size JPEG regardless of the original image\'s size/dimensions', async ({ page, request }) => {
+    test("should always re-encode the stored photo to a small fixed-size JPEG regardless of the original image's size/dimensions", async ({
+      page,
+      request,
+    }) => {
       const saveButton = page.getByRole('button', { name: 'Save' });
 
       // 1. Select a large 2000x2000px noisy PNG (stands in for a real ~15MB oversized original, injected in-page to avoid needing a real file on disk).
@@ -595,7 +608,9 @@ test.describe('Profile Settings', () => {
       await expect(saveButton).toBeDisabled();
     });
 
-    test('should combine rapid keystrokes into a multi-character type-ahead search, and jump fresh on a single letter after the reset window elapses', async ({ page }) => {
+    test('should combine rapid keystrokes into a multi-character type-ahead search, and jump fresh on a single letter after the reset window elapses', async ({
+      page,
+    }) => {
       const phoneInput = page.getByRole('textbox', { name: 'Phone Number' });
       const countryCombobox = phoneInput.locator('xpath=..').getByRole('combobox');
       const saveButton = page.getByRole('button', { name: 'Save' });
@@ -624,7 +639,9 @@ test.describe('Profile Settings', () => {
       await expect(saveButton).toBeDisabled();
     });
 
-    test('should reset Phone Number to the bare dial code when switching country, and allow restoring the original number', async ({ page }) => {
+    test('should reset Phone Number to the bare dial code when switching country, and allow restoring the original number', async ({
+      page,
+    }) => {
       const phoneInput = page.getByRole('textbox', { name: 'Phone Number' });
       const saveButton = page.getByRole('button', { name: 'Save' });
 
@@ -644,7 +661,9 @@ test.describe('Profile Settings', () => {
       await expect(phoneInput).toHaveValue(SEED_PHONE_FORMATTED);
     });
 
-    test('should silently switch the detected country when typed digits look like another country\'s dial code, and reset (not preserve) the digits when the country is changed back', async ({ page }) => {
+    test("should silently switch the detected country when typed digits look like another country's dial code, and reset (not preserve) the digits when the country is changed back", async ({
+      page,
+    }) => {
       const phoneInput = page.getByRole('textbox', { name: 'Phone Number' });
       const countryCodeField = page.locator('input[name="phone.countryCode"]');
       const saveButton = page.getByRole('button', { name: 'Save' });
@@ -907,7 +926,9 @@ test.describe('Profile Settings', () => {
       await page.getByRole('button', { name: 'Cancel' }).click();
     });
 
-    test('should show inconsistent blur validation across the three password fields — New Password never shows required, unlike Current and Confirm', async ({ page }) => {
+    test('should show inconsistent blur validation across the three password fields — New Password never shows required, unlike Current and Confirm', async ({
+      page,
+    }) => {
       const changePasswordButton = page.getByRole('button', { name: 'Change Password' });
       const currentPasswordInput = page.locator('input[name="currentPassword"]');
       const newPasswordInput = page.locator('input[name="newPassword"]');
@@ -953,7 +974,9 @@ test.describe('Profile Settings', () => {
       await page.getByRole('button', { name: 'Cancel' }).click();
     });
 
-    test('should keep Update disabled when New Password satisfies only some checklist rules, with no extra error text', async ({ page }) => {
+    test('should keep Update disabled when New Password satisfies only some checklist rules, with no extra error text', async ({
+      page,
+    }) => {
       const changePasswordButton = page.getByRole('button', { name: 'Change Password' });
       const currentPasswordInput = page.locator('input[name="currentPassword"]');
       const newPasswordInput = page.locator('input[name="newPassword"]');
@@ -1007,7 +1030,9 @@ test.describe('Profile Settings', () => {
       await expect(modalHeading).toBeHidden();
     });
 
-    test('should not block submission client-side when New Password equals Current Password, but must never actually be submitted', async ({ page }) => {
+    test('should not block submission client-side when New Password equals Current Password, but must never actually be submitted', async ({
+      page,
+    }) => {
       const changePasswordButton = page.getByRole('button', { name: 'Change Password' });
       const currentPasswordInput = page.locator('input[name="currentPassword"]');
       const newPasswordInput = page.locator('input[name="newPassword"]');
@@ -1097,7 +1122,10 @@ test.describe('Profile Settings', () => {
 test.describe('Full end-to-end password change (real email, real code)', () => {
   test.describe.configure({ retries: 1 });
 
-  test('should complete a real password change via the Change Password modal and allow login with the new password @real-email', async ({ page, browserName }) => {
+  test('should complete a real password change via the Change Password modal and allow login with the new password @real-email', async ({
+    page,
+    browserName,
+  }) => {
     test.skip(browserName !== 'chromium', 'Backend-only flow; runs once to avoid tripling load on the real email pipeline.');
     test.setTimeout(300_000);
 
