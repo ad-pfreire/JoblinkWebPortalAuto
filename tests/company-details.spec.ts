@@ -503,7 +503,12 @@ test.describe('Company Details', () => {
       // 1. Change Company Name/Contractor License/Email to new temporary
       // values, save, and confirm via reload they genuinely round-tripped -
       // then restore the baseline values the rest of this file depends on.
-      await companyName.fill('QA Automation Test Co TEMP');
+      // Company Name uses real-keystroke clearing, not fill() - live-verified
+      // 2026-09-08 that fill() can occasionally fail to clear this specific
+      // field first, appending onto the existing value instead of replacing
+      // it and corrupting the shared seed account's real Company Name.
+      await clearFieldWithBackspace(page, companyName);
+      await companyName.pressSequentially('QA Automation Test Co TEMP');
       await contractorLicense.fill('LIC-999999');
       await email.fill('qa-company-test-temp@crifa.com');
 
@@ -526,15 +531,24 @@ test.describe('Company Details', () => {
       await expect(companyDetailsCard(page).getByRole('heading', { name: 'LIC-999999' })).toBeVisible();
 
       // Cleanup: restore the baseline values, confirmed via the real
-      // response + reload (see CLAUDE.md's second-save-toast gotcha).
+      // response + reload (see CLAUDE.md's second-save-toast gotcha). Same
+      // real-keystroke clear as step 1, for the same reason.
       await page.goto(`${BASE_URL}/company?edit=true`);
-      await companyName.fill('QA Automation Test Co');
+      await clearFieldWithBackspace(page, companyName);
+      await companyName.pressSequentially('QA Automation Test Co');
       await contractorLicense.fill('LIC-123456');
       await email.fill('qa-company-test@crifa.com');
       await saveCompanyDetailsAndWaitForNavigation(page);
 
-      await page.goto(`${BASE_URL}/company`);
-      await expect(companyDetailsCard(page).getByRole('heading', { name: 'QA Automation Test Co', exact: true })).toBeVisible();
+      // Verifies the restore actually landed exactly, not just that the
+      // save succeeded - a retry loop, not a single check, since this exact
+      // field just proved capable of a real (if rare) clear-timing race.
+      await expect(async () => {
+        await page.goto(`${BASE_URL}/company`);
+        await expect(companyDetailsCard(page).getByRole('heading', { name: 'QA Automation Test Co', exact: true })).toBeVisible({
+          timeout: 5_000,
+        });
+      }).toPass({ timeout: 30_000 });
       await expect(companyDetailsCard(page).getByRole('heading', { name: 'qa-company-test@crifa.com' })).toBeVisible();
       await expect(companyDetailsCard(page).getByRole('heading', { name: 'LIC-123456' })).toBeVisible();
     });
