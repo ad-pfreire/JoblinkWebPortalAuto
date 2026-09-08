@@ -5,7 +5,13 @@ import { test, expect, Page, devices } from '@playwright/test';
 import { requireEnv } from './utils/env';
 import { getVerificationLink } from './utils/email';
 import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from './utils/account';
-import { stripeFindCustomerByEmail, stripeListCardPaymentMethods } from './utils/stripe';
+import {
+  stripeFindCustomerByEmail,
+  stripeListCardPaymentMethods,
+  stripeFindActiveSubscription,
+  stripeRequest,
+  stripeAttachClockAndAdvanceTo,
+} from './utils/stripe';
 
 const BASE_URL = requireEnv('BASE_URL');
 
@@ -1208,5 +1214,138 @@ test.describe('Payments', () => {
       // Confirms 6.6's promise: cancellation takes effect at period end, not
       // immediately, and the user retains a path to resume before then.
     });
+  });
+});
+
+// WEB-TC-121: self-contained (own account, own purchase). Uses Stripe's
+// test card 4000000000000341 (attaches fine, fails on any real charge) plus
+// a Test Clock advance to force a real renewal to fail.
+test.describe('Payments — A Failed Recurring Charge (Past-Due)', () => {
+  test('7.1 REAL: replacing the payment method with a card that fails on charge, then forcing a real renewal attempt against it, leaves the subscription genuinely past-due @real-email', async ({
+    browser,
+    browserName,
+  }) => {
+    test.skip(
+      browserName !== 'chromium',
+      'One real registration + purchase + payment-method replace + Test Clock advance; runs once on chromium.'
+    );
+    test.setTimeout(400_000);
+
+    const password = requireEnv('TEST_REGISTER_PASSWORD');
+    const context = await browser.newContext({ ...devices['Desktop Chrome'] });
+    const page = await context.newPage();
+    const emailAlias = generateUniqueEmailAlias();
+    const username = generateUsernameFromEmail(emailAlias);
+    const registeredAt = new Date();
+
+    await registerNewAccount(page, emailAlias);
+    const verificationLink = await getVerificationLink(emailAlias, registeredAt, 900_000);
+    await page.goto(verificationLink);
+    await expect(page).toHaveURL(`${BASE_URL}/login`);
+    await page.locator('input[name="username"]').fill(username);
+    await page.locator('input[name="password"]').fill(password);
+    await page.locator('button[type="submit"]').click();
+    await expect(page).toHaveURL(`${BASE_URL}/complete-profile`);
+    await completeProfile(page);
+    await expect(page).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
+
+    // 1. Purchase Job Link Pro (Monthly) with a normal, working card.
+    await page.goto(`${BASE_URL}/subscription`);
+    await page.getByRole('heading', { name: 'Job Link Pro', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeEnabled();
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Review Purchase', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Confirm and Pay' }).click();
+    await expect(page).toHaveURL(/checkout\.stripe\.com/, { timeout: 30_000 });
+    const emailField = page.getByLabel('Email');
+    if ((await emailField.count()) > 0 && !(await emailField.inputValue())) {
+      await emailField.fill(`${username}@example.com`);
+    }
+    await page.getByRole('textbox', { name: 'Card number' }).fill('4242424242424242');
+    await page.getByRole('textbox', { name: 'Expiration' }).fill('12/34');
+    await page.getByRole('textbox', { name: 'CVC' }).fill('123');
+    const cardholderNameField = page.getByRole('textbox', { name: 'Cardholder name' });
+    if ((await cardholderNameField.count()) > 0 && !(await cardholderNameField.inputValue())) {
+      await cardholderNameField.fill('QA Past-Due Test');
+    }
+    const payButton = page.getByRole('button', { name: /Subscribe|Pay/ });
+    await expect(payButton).toBeVisible();
+    await payButton.click();
+    await expect(page).toHaveURL(/\/subscription\?success=true/, { timeout: 45_000 });
+
+    // 2. Replace the saved payment method with Stripe's own documented
+    // "attaches fine, fails on any real charge" test card - same
+    // Update-Payment-Method flow already proven in this file's own 6.2.
+    await page.goto(`${BASE_URL}/payments`);
+    await (await billingAddressFrame(page)).getByRole('textbox', { name: 'Full name' }).pressSequentially('QA Past-Due Test');
+    await (await billingAddressFrame(page)).getByRole('textbox', { name: 'Address line 1' }).pressSequentially('123 Main Street');
+    await (await billingAddressFrame(page)).locator('#billingAddress-localityInput').pressSequentially('Quito');
+    await (await billingAddressFrame(page)).locator('#billingAddress-postalCodeInput').pressSequentially('170150');
+    await (await cardElementFrame(page)).getByRole('textbox', { name: 'Card number' }).pressSequentially('4000000000000341');
+    await (await cardElementFrame(page)).getByRole('textbox', { name: 'Expiration date' }).pressSequentially('1234');
+    await (await cardElementFrame(page)).getByRole('textbox', { name: 'Security code' }).pressSequentially('123');
+    await checkSavePaymentDetailsCheckbox(page);
+    const updateButton = page.getByRole('button', { name: 'Update Payment Method' });
+    await expect(updateButton).toBeEnabled();
+    await updateButton.click();
+    await expect(page).toHaveURL(`${BASE_URL}/company`, { timeout: 20_000 });
+
+    const stripeCustomerId = await stripeFindCustomerByEmail(emailAlias);
+    const cards = await stripeListCardPaymentMethods(stripeCustomerId);
+    expect(cards.some((c) => c.card.last4 === '0341')).toBe(true);
+
+    // 3. Advance a real Test Clock just past the period end, with no
+    // cancellation scheduled - Stripe's real billing engine attempts a
+    // genuine renewal charge against the now-bad card, and it fails.
+    const { id: subId, currentPeriodEnd } = await stripeFindActiveSubscription(stripeCustomerId);
+    await stripeAttachClockAndAdvanceTo(stripeCustomerId, currentPeriodEnd);
+
+    // 4. Ground truth: the subscription is no longer cleanly 'active' -
+    // Stripe's own real terminology for this (REAL FINDING, whichever it
+    // turns out to be - documented rather than assumed).
+    const subAfter = await stripeRequest('GET', `/subscriptions/${subId}`);
+    console.log(`[WEB-TC-121] REAL FINDING: subscription status after a forced failed renewal charge is "${subAfter.status}".`);
+    expect(subAfter.status).not.toBe('active');
+    expect(['past_due', 'unpaid', 'incomplete', 'incomplete_expired', 'canceled']).toContain(subAfter.status);
+
+    // 5. Best-effort real check of whatever the UI actually shows for this
+    // state - genuinely unverified territory, so this documents rather
+    // than assumes exact wording.
+    await page.goto(`${BASE_URL}/subscription`);
+    const subscriptionPageText = (await page.locator('body').innerText()).slice(0, 2000);
+    console.log(`[WEB-TC-121] /subscription page text after the forced failure (first 2000 chars): ${subscriptionPageText}`);
+    await page.goto(`${BASE_URL}/company`);
+    const companyPageText = (await page.locator('body').innerText()).slice(0, 2000);
+    console.log(`[WEB-TC-121] /company page text after the forced failure (first 2000 chars): ${companyPageText}`);
+
+    // 6. Attempt the "retry via a new payment method" half of the
+    // checklist item: replace the bad card with a working one again and
+    // see whether the account genuinely recovers.
+    await page.goto(`${BASE_URL}/payments`);
+    const retryUpdateButton = page.getByRole('button', { name: 'Update Payment Method' });
+    if ((await retryUpdateButton.count()) > 0) {
+      await (await billingAddressFrame(page)).getByRole('textbox', { name: 'Full name' }).pressSequentially('QA Past-Due Retry');
+      await (await billingAddressFrame(page)).getByRole('textbox', { name: 'Address line 1' }).pressSequentially('123 Main Street');
+      await (await billingAddressFrame(page)).locator('#billingAddress-localityInput').pressSequentially('Quito');
+      await (await billingAddressFrame(page)).locator('#billingAddress-postalCodeInput').pressSequentially('170150');
+      await (await cardElementFrame(page)).getByRole('textbox', { name: 'Card number' }).pressSequentially('4242424242424242');
+      await (await cardElementFrame(page)).getByRole('textbox', { name: 'Expiration date' }).pressSequentially('1234');
+      await (await cardElementFrame(page)).getByRole('textbox', { name: 'Security code' }).pressSequentially('123');
+      await checkSavePaymentDetailsCheckbox(page);
+      await expect(retryUpdateButton).toBeEnabled();
+      await retryUpdateButton.click();
+      await page.waitForTimeout(5_000);
+
+      const subAfterRetry = await stripeRequest('GET', `/subscriptions/${subId}`);
+      console.log(
+        `[WEB-TC-121] REAL FINDING: subscription status after replacing the bad card with a working one is "${subAfterRetry.status}" (recovery ${subAfterRetry.status === 'active' ? 'DID' : 'did NOT'} happen automatically from merely updating the payment method).`
+      );
+    } else {
+      console.log(
+        '[WEB-TC-121] REAL FINDING: /payments no longer offers an "Update Payment Method" action at all in this state - no in-app retry path was found.'
+      );
+    }
+
+    await context.close();
   });
 });

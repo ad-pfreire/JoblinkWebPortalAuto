@@ -188,3 +188,58 @@ export async function getPasswordResetCode(toAddress: string, sentAfter: Date, t
   }
   throw new Error(`Timed out waiting for password recovery email to ${toAddress} after ${timeoutMs}ms.`);
 }
+
+/**
+ * Polls for a NEW email to arrive at `toAddress` after `sentAfter`, without
+ * assuming a specific subject/content - used to check whether some
+ * not-yet-confirmed notification (e.g. a team-removal notice) exists at
+ * all. Unlike this file's other functions, this one DOES filter by date -
+ * deliberately, because the whole point here is telling a genuinely new
+ * message apart from an OLDER one already sitting in the same mailbox from
+ * an earlier step of the same test (e.g. that address's own invitation
+ * email, read but never removed from the inbox). Filters by each
+ * candidate's own parsed date client-side (not IMAP's `since` SEARCH
+ * criterion, which has its own documented same-day false-negative bug -
+ * see CLAUDE.md), and reconnects fresh on every poll like the other functions here.
+ *
+ * @returns The subject of the first genuinely-new email found, or `null`
+ * if none arrived within `timeoutMs` (a real "no email sent" result, not a
+ * thrown error - the caller decides whether that's expected).
+ */
+export async function checkForAnyEmail(toAddress: string, sentAfter: Date, timeoutMs = 60000): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const client = new ImapFlow({
+      host: 'imap.gmail.com',
+      port: 993,
+      secure: true,
+      auth: {
+        user: requireEnv('GMAIL_IMAP_USER'),
+        pass: requireEnv('GMAIL_IMAP_APP_PASSWORD'),
+      },
+      logger: false,
+    });
+    await client.connect();
+    try {
+      const lock = await client.getMailboxLock('INBOX');
+      try {
+        const uids = await client.search({ to: toAddress }, { uid: true });
+        for (const uid of uids ? [...uids].reverse() : []) {
+          const message = await client.fetchOne(uid, { source: true, envelope: true }, { uid: true });
+          if (!message || !message.source) continue;
+          const envelopeDate = message.envelope?.date;
+          if (envelopeDate && new Date(envelopeDate) > sentAfter) {
+            const parsed = await simpleParser(message.source);
+            return parsed.subject || '(no subject)';
+          }
+        }
+      } finally {
+        lock.release();
+      }
+    } finally {
+      await client.logout();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+  return null;
+}

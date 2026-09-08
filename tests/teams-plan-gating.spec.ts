@@ -43,12 +43,25 @@ async function stripeRequest(method: 'GET' | 'POST', path: string, body?: Record
   return json;
 }
 
+// The List endpoint silently excludes a customer once a Test Clock has been
+// attached to it (see tests/utils/stripe.ts's copy of this function) -
+// falls back to Search only when List comes back empty.
 async function stripeFindCustomerByEmail(email: string): Promise<string> {
   const result = await stripeRequest('GET', `/customers?email=${encodeURIComponent(email)}&limit=1`);
-  if (!result.data?.length) {
-    throw new Error(`No Stripe customer found for email ${email}`);
+  if (result.data?.length) {
+    return result.data[0].id;
   }
-  return result.data[0].id;
+  const query = encodeURIComponent(`email:'${email.replace(/'/g, "\\'")}'`);
+  const headers: Record<string, string> = {
+    Authorization: `Basic ${Buffer.from(`${STRIPE_KEY}:`).toString('base64')}`,
+    'Stripe-Version': '2024-06-20',
+  };
+  const searchResponse = await fetch(`${STRIPE_API}/customers/search?query=${query}`, { method: 'GET', headers });
+  const searchJson = await searchResponse.json();
+  if (searchResponse.ok && searchJson.data?.length) {
+    return searchJson.data[0].id;
+  }
+  throw new Error(`No Stripe customer found for email ${email} (checked both List and Search).`);
 }
 
 async function stripeFindActiveSubscription(customerId: string): Promise<{ id: string; currentPeriodEnd: number }> {
@@ -443,5 +456,553 @@ test.describe('Teams Plan Gating', () => {
       expect(memberTierAfterLapse).toBe(memberTierWhileOwnerActive);
       expect(['pro', 'invoice', 'invoicing']).not.toContain(memberTierAfterLapse);
     });
+  });
+});
+
+// --- Stripe iframe helpers, duplicated from subscription.spec.ts (per-file-helper convention - see CLAUDE.md) ---
+// Needed only by Suite 7 below ("Resume Subscription"), whose dialog reuses
+// the same embedded Stripe Elements Billing Address/Card component as
+// /payments' own form - the same iframe-swap/mounting gotchas apply.
+async function resolveStripeFrameByContent(page: Page, iframeTitle: string, expectedFieldName: string, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastCandidateCount = 0;
+  while (Date.now() < deadline) {
+    const candidates = page.locator(`iframe[title="${iframeTitle}"]`);
+    lastCandidateCount = await candidates.count();
+    for (let i = 0; i < lastCandidateCount; i++) {
+      const candidate = candidates.nth(i);
+      try {
+        if ((await candidate.contentFrame().getByRole('textbox', { name: expectedFieldName }).count()) > 0) {
+          const frameName = await candidate.getAttribute('name');
+          return page.frameLocator(`iframe[name="${frameName}"]`);
+        }
+      } catch {
+        // Fall through to the next poll iteration.
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  throw new Error(
+    `No iframe titled "${iframeTitle}" (out of ${lastCandidateCount} candidate(s)) contained a "${expectedFieldName}" textbox within ${timeoutMs}ms.`
+  );
+}
+
+async function billingAddressFrame(page: Page) {
+  const frame = await resolveStripeFrameByContent(page, 'Secure address input frame', 'Full name');
+  await frame.locator('#billingAddress-addressLine1Input').waitFor({ state: 'attached', timeout: 15_000 });
+  return frame;
+}
+
+async function cardElementFrame(page: Page) {
+  return resolveStripeFrameByContent(page, 'Secure payment input frame', 'Card number');
+}
+
+async function fillAndSubmitResumeDialogPaymentMethod(page: Page, cardNumber: string) {
+  const fieldTimeout = { timeout: 10_000 };
+  const settle = () => page.waitForTimeout(400);
+  await (await billingAddressFrame(page)).getByRole('textbox', { name: 'Full name' }).pressSequentially('QA Tier Test', fieldTimeout);
+  await settle();
+  await (
+    await billingAddressFrame(page)
+  )
+    .getByRole('textbox', { name: 'Address line 1' })
+    .pressSequentially('123 Main Street', fieldTimeout);
+  await settle();
+  await (await billingAddressFrame(page)).locator('#billingAddress-localityInput').pressSequentially('Quito', fieldTimeout);
+  await settle();
+  await (await billingAddressFrame(page)).locator('#billingAddress-postalCodeInput').pressSequentially('170150', fieldTimeout);
+  await settle();
+  await (await cardElementFrame(page)).getByRole('textbox', { name: 'Card number' }).pressSequentially(cardNumber, fieldTimeout);
+  await settle();
+  await (await cardElementFrame(page)).getByRole('textbox', { name: 'Expiration date' }).pressSequentially('1234', fieldTimeout);
+  await settle();
+  await (await cardElementFrame(page)).getByRole('textbox', { name: 'Security code' }).pressSequentially('123', fieldTimeout);
+  await settle();
+
+  const saveCheckbox = (await cardElementFrame(page)).getByRole('checkbox', { name: 'Save payment details for future purchases' });
+  await saveCheckbox.click();
+  if (!(await saveCheckbox.isChecked())) {
+    await saveCheckbox.click();
+  }
+  await expect(saveCheckbox).toBeChecked();
+  await settle();
+
+  const updateButton = page.getByRole('button', { name: 'Update Payment Method' });
+  await expect(updateButton).toBeEnabled();
+  await updateButton.click();
+}
+
+// WEB-TC-128 through 138: the per-member "Subscription Plan" delegation
+// field (see specs/teams-membership-tier-test-plan.md) - its real DOM
+// structure/id/options were confirmed via a live investigation script first.
+test.describe('Teams — Membership Tier ("Subscription Plan") Delegation', () => {
+  test.describe.configure({ mode: 'serial' });
+
+  // Reuses one disposable owner+member pair already registered and
+  // real-Pro-purchased by an earlier investigation script - avoids a second
+  // full register+purchase+invite/accept round trip.
+  const tierOwnerUsername = 'paulfreireausriz0lbh';
+  const tierOwnerEmail = 'paul.freire+ausriz0lbh@crifa.com';
+  const tierMemberUsername = 'paulfreireausrjrk3jy';
+  const tierMemberEmail = 'paul.freire+ausrjrk3jy@crifa.com';
+  let tierPassword: string;
+  let tierOwnerMongoId: string;
+  let tierMemberMongoId: string;
+  let tierStripeCustomerId: string;
+  let tierStripeSubscriptionId: string;
+
+  async function loginAsTier(page: Page, username: string) {
+    await page.goto(`${BASE_URL}/login`);
+    await page.locator('input[name="username"]').fill(username);
+    await page.locator('input[name="password"]').fill(tierPassword);
+    await page.locator('button[type="submit"]').click();
+    await expect(page).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
+  }
+
+  /** Navigates to the company-wide Members list and opens the one real member's 'About' panel. */
+  async function openMemberDetailsPanel(page: Page) {
+    await page.goto(`${BASE_URL}/teams/members`);
+    const memberCard = page.getByRole('link', { name: /QA Automation/ }).or(page.getByRole('button', { name: /QA Automation/ }));
+    await memberCard.first().click();
+    await expect(page).toHaveURL(/\/teams\/members\?member=.+&cardDetails=true/, { timeout: 15_000 });
+    await expect(page.getByRole('heading', { name: 'About', exact: true })).toBeVisible({ timeout: 15_000 });
+  }
+
+  // Live-verified real id (see specs/teams-membership-tier-test-plan.md) - not the label text, since the label's accessible name changes with the current value (same MUI gotcha as Company Details' State field - see CLAUDE.md).
+  function tierSelect(page: Page) {
+    return page.locator('#mui-component-select-newType');
+  }
+
+  async function selectMemberTier(page: Page, optionName: 'Job Link' | 'Job Link Pro' | 'Job Link Pro + Invoicing') {
+    await tierSelect(page).click();
+    await page.getByRole('option', { name: optionName, exact: true }).click();
+  }
+
+  function updateSubscriptionDialogHeading(page: Page) {
+    return page.getByRole('heading', { name: 'Update Subscription', exact: true });
+  }
+
+  /**
+   * Waits for the dialog's cost preview to resolve, without assuming which
+   * label it lands on - a pre-existing account credit can make even a
+   * genuine upgrade show 'New Account Balance' instead of 'Order Total'
+   * (see Suite 6). Only 4.1's own credit-free scenario asserts the specific label.
+   */
+  async function waitForCostPreviewResolved(page: Page) {
+    await expect(page.getByText('Order Total', { exact: true }).or(page.getByText('New Account Balance', { exact: true }))).toBeVisible({
+      timeout: 15_000,
+    });
+  }
+
+  async function confirmDialogAndPay(page: Page) {
+    await expect(page.getByRole('button', { name: 'Confirm and Pay' })).toBeEnabled({ timeout: 20_000 });
+    await page.getByRole('button', { name: 'Confirm and Pay' }).click();
+  }
+
+  test.beforeAll(async ({ browserName }) => {
+    test.skip(
+      browserName !== 'chromium',
+      "Reuses one disposable owner+member pair from this session's own live investigation; runs once on chromium."
+    );
+    tierPassword = requireEnv('TEST_REGISTER_PASSWORD');
+
+    const ownerDoc = await getUserByEmail(tierOwnerEmail);
+    const memberDoc = await getUserByEmail(tierMemberEmail);
+    if (!ownerDoc || !memberDoc) {
+      throw new Error('Could not resolve the reused owner/member Mongo user documents for the Membership Tier suite - aborting.');
+    }
+    tierOwnerMongoId = String(ownerDoc._id);
+    tierMemberMongoId = String(memberDoc._id);
+
+    tierStripeCustomerId = await stripeFindCustomerByEmail(tierOwnerEmail);
+    const { id: subId } = await stripeFindActiveSubscription(tierStripeCustomerId);
+    tierStripeSubscriptionId = subId;
+  });
+
+  test.beforeEach(async ({ browserName }) => {
+    test.skip(
+      browserName !== 'chromium',
+      "Reuses one disposable owner+member pair from this session's own live investigation; runs once on chromium."
+    );
+  });
+
+  test.describe('Suite 2 - Base State on an Actively-Paid Owner', () => {
+    test("2.1 REAL: on an actively-Pro owner, the member's Subscription Plan field is enabled, defaults to Job Link (free), and offers exactly three options @real-email", async ({
+      page,
+    }) => {
+      await loginAsTier(page, tierOwnerUsername);
+      await openMemberDetailsPanel(page);
+
+      const field = tierSelect(page);
+      await expect(field).toHaveText('Job Link');
+      // MUI applies Mui-disabled to the immediate MuiInputBase-root wrapper when disabled - live-verified against this exact field's own disabled Email sibling above it, which does carry the class.
+      await expect(field.locator('xpath=..')).not.toHaveClass(/Mui-disabled/);
+
+      await field.click();
+      await expect(page.getByRole('option', { name: 'Job Link', exact: true })).toBeVisible();
+      await expect(page.getByRole('option', { name: 'Job Link Pro', exact: true })).toBeVisible();
+      await expect(page.getByRole('option', { name: 'Job Link Pro + Invoicing', exact: true })).toBeVisible();
+      await page.keyboard.press('Escape');
+
+      const tier = await getDelegatedMembershipTier(tierOwnerMongoId, tierMemberMongoId);
+      expect(tier).toBe('free');
+    });
+  });
+
+  test.describe('Suite 4 - Upgrading a Member (Dialog, Skeleton, No-Op Guard)', () => {
+    test('4.1 Re-selecting the current value opens no dialog; selecting a higher tier opens Update Subscription with a real cost preview @real-email', async ({
+      page,
+    }) => {
+      await loginAsTier(page, tierOwnerUsername);
+      await openMemberDetailsPanel(page);
+
+      // 1. No-op guard: re-selecting the field's own current value ('Job Link') must not open a dialog.
+      await selectMemberTier(page, 'Job Link');
+      await page.waitForTimeout(1_500);
+      await expect(updateSubscriptionDialogHeading(page)).toHaveCount(0);
+
+      // 2. A genuine upgrade opens the dialog immediately on selection - live-verified this is a real MuiModal (no role="dialog"), not the role-based dialog subscription.spec.ts's own comparison page uses.
+      await selectMemberTier(page, 'Job Link Pro');
+      await expect(updateSubscriptionDialogHeading(page)).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByText('The full subscription amount will be billed on your next cycle date', { exact: true })).toBeVisible();
+
+      // 3. Real cost preview resolves to 'Order Total' (a net charge, matching the owner's own equivalent dialog - see CLAUDE.md/specs/subscription-test-plan.md) with a real dollar amount, not 'New Account Balance'.
+      await expect(page.getByText('Order Total', { exact: true })).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByText('New Account Balance', { exact: true })).toHaveCount(0);
+      await expect(page.getByText(/\$\d+\.\d{2}/).first()).toBeVisible();
+
+      await expect(page.getByRole('button', { name: 'No, go back', exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Confirm and Pay' })).toBeVisible();
+    });
+
+    test("4.2 'No, go back' reverts the visible selection and makes zero real change in Stripe or MongoDB @real-email", async ({
+      page,
+    }) => {
+      const before = await stripeRequest('GET', `/subscriptions/${tierStripeSubscriptionId}`);
+      const itemIdsBefore = (before.items?.data ?? []).map((i: { id: string }) => i.id).sort();
+
+      await loginAsTier(page, tierOwnerUsername);
+      await openMemberDetailsPanel(page);
+      await selectMemberTier(page, 'Job Link Pro');
+      await expect(updateSubscriptionDialogHeading(page)).toBeVisible({ timeout: 10_000 });
+      await page.getByRole('button', { name: 'No, go back', exact: true }).click();
+
+      await expect(updateSubscriptionDialogHeading(page)).toHaveCount(0);
+      await expect(tierSelect(page)).toHaveText('Job Link');
+
+      const after = await stripeRequest('GET', `/subscriptions/${tierStripeSubscriptionId}`);
+      const itemIdsAfter = (after.items?.data ?? []).map((i: { id: string }) => i.id).sort();
+      expect(itemIdsAfter).toEqual(itemIdsBefore);
+
+      const tier = await getDelegatedMembershipTier(tierOwnerMongoId, tierMemberMongoId);
+      expect(tier).toBe('free');
+    });
+
+    test("4.3 'Confirm and Pay' on a genuine upgrade completes end-to-end - in the UI (after reload), Stripe, and MongoDB @real-email", async ({
+      page,
+    }) => {
+      const before = await stripeRequest('GET', `/subscriptions/${tierStripeSubscriptionId}`);
+      const quantityBefore = before.items?.data?.[0]?.quantity ?? 0;
+
+      await loginAsTier(page, tierOwnerUsername);
+      await openMemberDetailsPanel(page);
+      await selectMemberTier(page, 'Job Link Pro');
+      await expect(updateSubscriptionDialogHeading(page)).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByText('Order Total', { exact: true })).toBeVisible({ timeout: 15_000 });
+      await confirmDialogAndPay(page);
+
+      // The app does an unconditional window.location.reload() on success - a fresh re-navigation sidesteps needing to detect that exact event (see CLAUDE.md's general pattern for post-mutation reload races).
+      await page.waitForTimeout(3_000);
+      await openMemberDetailsPanel(page);
+      await expect(tierSelect(page)).toHaveText('Job Link Pro', { timeout: 15_000 });
+
+      const tier = await getDelegatedMembershipTier(tierOwnerMongoId, tierMemberMongoId);
+      expect(['pro', 'invoicing']).toContain(tier);
+
+      // REAL FINDING, not the intuitive mechanism: delegating a member's
+      // tier does NOT add a new Stripe subscription item - it increments
+      // the QUANTITY of the owner's own existing matching-tier item
+      // instead (live-verified 2026-09-08: item count stayed exactly 1;
+      // quantity went from 1 to 2 for the owner's own 'Job Link Pro' item).
+      const subAfter = await stripeRequest('GET', `/subscriptions/${tierStripeSubscriptionId}`);
+      expect(subAfter.items?.data ?? []).toHaveLength((before.items?.data ?? []).length);
+      expect(subAfter.items?.data?.[0]?.quantity).toBeGreaterThan(quantityBefore);
+    });
+  });
+
+  test.describe('Suite 5 - Downgrading a Member (New Account Balance)', () => {
+    test("5.1 Selecting a lower tier shows 'New Account Balance' instead of 'Order Total', as a credit @real-email", async ({ page }) => {
+      await loginAsTier(page, tierOwnerUsername);
+      await openMemberDetailsPanel(page);
+      await selectMemberTier(page, 'Job Link');
+      await expect(updateSubscriptionDialogHeading(page)).toBeVisible({ timeout: 10_000 });
+
+      await expect(page.getByText('New Account Balance', { exact: true })).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByText('Order Total', { exact: true })).toHaveCount(0);
+    });
+
+    test('5.2 Confirming the downgrade applies correctly - the field, Stripe, and MongoDB all agree it reverted to free @real-email', async ({
+      page,
+    }) => {
+      await loginAsTier(page, tierOwnerUsername);
+      await openMemberDetailsPanel(page);
+      await selectMemberTier(page, 'Job Link');
+      await expect(updateSubscriptionDialogHeading(page)).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByText('New Account Balance', { exact: true })).toBeVisible({ timeout: 15_000 });
+      await confirmDialogAndPay(page);
+
+      await page.waitForTimeout(3_000);
+      await openMemberDetailsPanel(page);
+      await expect(tierSelect(page)).toHaveText('Job Link', { timeout: 15_000 });
+
+      const tier = await getDelegatedMembershipTier(tierOwnerMongoId, tierMemberMongoId);
+      expect(tier).toBe('free');
+
+      // Best-effort real-world check that the resulting credit is actually visible somewhere real, not merely claimed by the dialog's own preview.
+      const upcoming = await stripeRequest('GET', `/invoices/upcoming?customer=${tierStripeCustomerId}`).catch((e) => {
+        console.log(
+          `[WEB-TC-136] No upcoming invoice available to inspect (${e instanceof Error ? e.message : e}) - documenting, not failing.`
+        );
+        return null;
+      });
+      if (upcoming) {
+        console.log(
+          `[WEB-TC-136] Owner's upcoming invoice starting_balance/total after the member downgrade credit: ${JSON.stringify({ starting_balance: upcoming.starting_balance, total: upcoming.total })}`
+        );
+      }
+    });
+  });
+
+  test.describe('Suite 6 - Gating While a Cancellation Is PENDING (Scheduled, Not Yet Effective)', () => {
+    test('6.1 Re-elevating the member, then scheduling a real (pending) cancellation disables the Subscription Plan field @real-email', async ({
+      page,
+    }) => {
+      test.setTimeout(120_000);
+      // 1. Re-elevate the member to Job Link Pro first, so this suite tests a member who genuinely holds a paid delegated tier at the moment the cancellation is scheduled.
+      await loginAsTier(page, tierOwnerUsername);
+      await openMemberDetailsPanel(page);
+      await selectMemberTier(page, 'Job Link Pro');
+      await expect(updateSubscriptionDialogHeading(page)).toBeVisible({ timeout: 10_000 });
+      await waitForCostPreviewResolved(page);
+      await confirmDialogAndPay(page);
+      await page.waitForTimeout(3_000);
+
+      // 2. Schedule a real cancellation via the owner's own /subscription page (reuses this file's own already-proven helper).
+      await page.goto(`${BASE_URL}/subscription`);
+      await cancelSubscriptionAndFinish(page);
+
+      const subAfter = await stripeRequest('GET', `/subscriptions/${tierStripeSubscriptionId}`);
+      expect(subAfter.cancel_at_period_end).toBe(true);
+      expect(subAfter.status).toBe('active');
+
+      // 3. The Subscription Plan field is now disabled with a message naming the pending cancellation.
+      await openMemberDetailsPanel(page);
+      await expect(tierSelect(page).locator('xpath=..')).toHaveClass(/Mui-disabled/, { timeout: 15_000 });
+      await expect(page.getByText(/^Plan will be canceled on .+\.$/)).toBeVisible();
+    });
+
+    test("6.2 The member's already-delegated tier is untouched by merely SCHEDULING a cancellation @real-email", async ({ page }) => {
+      await loginAsTier(page, tierOwnerUsername);
+      await openMemberDetailsPanel(page);
+      await expect(tierSelect(page)).toHaveText('Job Link Pro');
+
+      const tier = await getDelegatedMembershipTier(tierOwnerMongoId, tierMemberMongoId);
+      expect(['pro', 'invoicing']).toContain(tier);
+    });
+  });
+
+  test.describe('Suite 7 - Resuming Re-Enables Membership Tier Updates', () => {
+    test("7.1 'Resume Subscription' (with a fresh card) re-enables the Subscription Plan field and clears the cancellation message @real-email", async ({
+      page,
+    }) => {
+      test.setTimeout(180_000);
+      await loginAsTier(page, tierOwnerUsername);
+      await page.goto(`${BASE_URL}/subscription`);
+      await page.getByRole('button', { name: 'Resume Subscription', exact: true }).click();
+      await expect(page.getByRole('heading', { name: 'Payment Method', exact: true })).toBeVisible();
+      await fillAndSubmitResumeDialogPaymentMethod(page, '4242424242424242');
+      await expect(page).toHaveURL(/\/subscription\?success=resume/, { timeout: 45_000 });
+
+      const subAfter = await stripeRequest('GET', `/subscriptions/${tierStripeSubscriptionId}`);
+      expect(subAfter.cancel_at_period_end).toBe(false);
+
+      await openMemberDetailsPanel(page);
+      await expect(tierSelect(page).locator('xpath=..')).not.toHaveClass(/Mui-disabled/, { timeout: 15_000 });
+      await expect(page.getByText(/^Plan will be canceled on .+\.$/)).toHaveCount(0);
+    });
+
+    test('7.2 A real tier change after resuming completes end-to-end, proving the field is functionally re-enabled @real-email', async ({
+      page,
+    }) => {
+      await loginAsTier(page, tierOwnerUsername);
+      await openMemberDetailsPanel(page);
+      await selectMemberTier(page, 'Job Link Pro + Invoicing');
+      await expect(updateSubscriptionDialogHeading(page)).toBeVisible({ timeout: 10_000 });
+      await waitForCostPreviewResolved(page);
+      await confirmDialogAndPay(page);
+
+      await page.waitForTimeout(3_000);
+      await openMemberDetailsPanel(page);
+      await expect(tierSelect(page)).toHaveText('Job Link Pro + Invoicing', { timeout: 15_000 });
+
+      const tier = await getDelegatedMembershipTier(tierOwnerMongoId, tierMemberMongoId);
+      expect(tier).toBe('invoicing');
+    });
+  });
+
+  test.describe('Suite 8 - A Real Lapse Resets the Delegated Tier to Free', () => {
+    test('8.1-8.2 Advancing a real Test Clock past a fresh cancellation resets the Subscription Plan to Job Link (free), disabled, with the no-subscription message @real-email', async ({
+      page,
+    }) => {
+      test.setTimeout(400_000);
+      // 1. Schedule a fresh real cancellation (the member still holds 'Job Link Pro + Invoicing' from 7.2).
+      await loginAsTier(page, tierOwnerUsername);
+      await page.goto(`${BASE_URL}/subscription`);
+      await cancelSubscriptionAndFinish(page);
+
+      // 2. Reuse this file's own already-proven Test Clock mechanism (Suite 1's beforeAll) to advance a real clock past the period end.
+      const { currentPeriodEnd } = await stripeFindActiveSubscription(tierStripeCustomerId);
+      await attachClockAndAdvancePastPeriodEnd(tierStripeCustomerId, currentPeriodEnd);
+
+      const finalSub = await stripeRequest('GET', `/subscriptions/${tierStripeSubscriptionId}`);
+      expect(finalSub.status).toBe('canceled');
+
+      // 3. The field resets to Job Link (free), disabled, with the no-active-subscription-at-all message.
+      await openMemberDetailsPanel(page);
+      await expect(tierSelect(page)).toHaveText('Job Link', { timeout: 15_000 });
+      await expect(tierSelect(page).locator('xpath=..')).toHaveClass(/Mui-disabled/);
+      await expect(
+        page.getByText("You'll need a subscription for your account before updating other member subscriptions.", { exact: true })
+      ).toBeVisible();
+
+      const tier = await getDelegatedMembershipTier(tierOwnerMongoId, tierMemberMongoId);
+      expect(tier).toBe('free');
+    });
+  });
+
+  test.describe('Suite 9 - Member-Side Perspective (No Self-Service, No Assigning to Others)', () => {
+    test('9.1 REAL: logging in as the member directly, there is no UI anywhere to view/change their own or any other member’s delegated tier (WEB-TC-122) @real-email', async ({
+      page,
+    }) => {
+      await loginAsTier(page, tierMemberUsername);
+
+      // 1. No trace of the 'Subscription Plan' field/label anywhere reachable from the member's own session.
+      await page.goto(`${BASE_URL}/company`);
+      await expect(page.getByText('Subscription Plan', { exact: true })).toHaveCount(0);
+      await page.goto(`${BASE_URL}/teams`);
+      await expect(page.getByText('Subscription Plan', { exact: true })).toHaveCount(0);
+      await page.goto(`${BASE_URL}/teams/members`);
+      await expect(page.getByText('Subscription Plan', { exact: true })).toHaveCount(0);
+
+      // 2. WEB-TC-122: a non-owner member has no path to assign a subscription to ANY member (themselves or anyone else) -
+      // the owner-only DetailsPanel route, tried directly, does not expose the tier control to a member either.
+      await page.goto(`${BASE_URL}/teams/members?member=${tierMemberMongoId}&cardDetails=true`);
+      await expect(page.getByText('Subscription Plan', { exact: true })).toHaveCount(0);
+
+      // 3. The member's OWN /subscription page reflects their own independent personal plan (still their own default trial, never touched by anything done to their delegated tier above) - never conflated with the owner's company-level delegation.
+      await page.goto(`${BASE_URL}/subscription`);
+      await expect(page.getByText(/^You're currently on a Free trial for .+\. Your free trial ends at .+\.$/)).toBeVisible({
+        timeout: 15_000,
+      });
+    });
+  });
+});
+
+// Does a never-purchased default trial count as "active" for Membership
+// Tier gating? Cheapest scenario to set up (no Stripe Checkout at all) - a
+// standalone describe, independent of the far more expensive Suite above.
+test.describe('Teams — Membership Tier Gating on a Trial-Only Owner (Never Purchased)', () => {
+  test('3.1 REAL FINDING: whether a Free Trial owner counts as "active" for a member\'s Subscription Plan field @real-email', async ({
+    browser,
+    browserName,
+  }) => {
+    test.skip(browserName !== 'chromium', 'Two real registrations + one invite/accept round-trip; runs once on chromium only.');
+    test.setTimeout(500_000);
+
+    const password = requireEnv('TEST_REGISTER_PASSWORD');
+
+    const ownerContext = await browser.newContext({ ...devices['Desktop Chrome'] });
+    const ownerPage = await ownerContext.newPage();
+    const ownerEmail = generateUniqueEmailAlias();
+    const ownerUsername = generateUsernameFromEmail(ownerEmail);
+    const ownerRegisteredAt = new Date();
+    await registerNewAccount(ownerPage, ownerEmail);
+    const ownerVerifyLink = await getVerificationLink(ownerEmail, ownerRegisteredAt, 900_000);
+    await ownerPage.goto(ownerVerifyLink);
+    await expect(ownerPage).toHaveURL(`${BASE_URL}/login`);
+    await ownerPage.locator('input[name="username"]').fill(ownerUsername);
+    await ownerPage.locator('input[name="password"]').fill(password);
+    await ownerPage.locator('button[type="submit"]').click();
+    await expect(ownerPage).toHaveURL(`${BASE_URL}/complete-profile`);
+    await completeProfile(ownerPage);
+    await expect(ownerPage).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
+    // Deliberately never purchases anything - stays on the default trial.
+
+    const memberContext = await browser.newContext({ ...devices['Desktop Chrome'] });
+    const memberPage = await memberContext.newPage();
+    const memberEmail = generateUniqueEmailAlias();
+    const memberUsername = generateUsernameFromEmail(memberEmail);
+    const memberRegisteredAt = new Date();
+    await registerNewAccount(memberPage, memberEmail);
+    const memberVerifyLink = await getVerificationLink(memberEmail, memberRegisteredAt, 900_000);
+    await memberPage.goto(memberVerifyLink);
+    await expect(memberPage).toHaveURL(`${BASE_URL}/login`);
+    await memberPage.locator('input[name="username"]').fill(memberUsername);
+    await memberPage.locator('input[name="password"]').fill(password);
+    await memberPage.locator('button[type="submit"]').click();
+    await expect(memberPage).toHaveURL(`${BASE_URL}/complete-profile`);
+    await completeProfile(memberPage);
+    await expect(memberPage).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
+    await memberContext.close();
+
+    await ownerPage.goto(`${BASE_URL}/teams/members`);
+    await ownerPage.getByRole('button', { name: 'Invite Member' }).click();
+    const combobox = ownerPage.getByRole('combobox', { name: 'Add People by Email' });
+    await combobox.click();
+    await combobox.pressSequentially(memberEmail);
+    await ownerPage.keyboard.press('Enter');
+    await ownerPage.getByRole('button', { name: 'Invite' }).click();
+    await expect(ownerPage.getByText('Your invitation(s) have been sent.', { exact: true })).toBeVisible();
+
+    const invitationLink = await getInvitationLink(memberEmail, 240_000);
+    const memberAcceptContext = await browser.newContext({ ...devices['Desktop Chrome'] });
+    const memberAcceptPage = await memberAcceptContext.newPage();
+    await memberAcceptPage.goto(`${BASE_URL}/login`);
+    await memberAcceptPage.locator('input[name="username"]').fill(memberUsername);
+    await memberAcceptPage.locator('input[name="password"]').fill(password);
+    await memberAcceptPage.locator('button[type="submit"]').click();
+    await expect(memberAcceptPage).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
+    await memberAcceptPage.goto(invitationLink);
+    await memberAcceptPage.getByTestId('accept-btn').click();
+    await expect(memberAcceptPage).toHaveURL(`${BASE_URL}/company`, { timeout: 15_000 });
+    await memberAcceptContext.close();
+
+    // The real finding: open the member's panel and inspect the field's enabled/disabled state and any message.
+    await ownerPage.goto(`${BASE_URL}/teams/members`);
+    const memberCard = ownerPage.getByRole('link', { name: /QA Automation/ }).or(ownerPage.getByRole('button', { name: /QA Automation/ }));
+    await memberCard.first().click();
+    await expect(ownerPage).toHaveURL(/\/teams\/members\?member=.+&cardDetails=true/, { timeout: 15_000 });
+    await expect(ownerPage.getByRole('heading', { name: 'About', exact: true })).toBeVisible({ timeout: 15_000 });
+
+    const field = ownerPage.locator('#mui-component-select-newType');
+    await expect(field).toBeVisible({ timeout: 15_000 });
+    const isDisabled = (await field.locator('xpath=..').getAttribute('class'))?.includes('Mui-disabled') ?? false;
+    const memberInfoVisible = await ownerPage
+      .getByText("You'll need a subscription for your account before updating other member subscriptions.", { exact: true })
+      .isVisible()
+      .catch(() => false);
+
+    console.log(
+      `[WEB-TC-128] REAL FINDING: on a never-purchased trial-only owner, the member's Subscription Plan field is ${isDisabled ? 'DISABLED' : 'ENABLED'}` +
+        `${memberInfoVisible ? ' with the no-subscription message shown' : ' with no error message shown'}.`
+    );
+
+    // Document whichever real outcome occurred - both are legitimate, previously-unknown answers (see specs/teams-membership-tier-test-plan.md Suite 3).
+    if (isDisabled) {
+      expect(memberInfoVisible).toBe(true);
+    } else {
+      expect(memberInfoVisible).toBe(false);
+    }
+    await ownerContext.close();
   });
 });

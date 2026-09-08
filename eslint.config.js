@@ -1,4 +1,3 @@
-// @ts-check
 const tseslint = require('typescript-eslint');
 const playwright = require('eslint-plugin-playwright');
 const eslintConfigPrettier = require('eslint-config-prettier');

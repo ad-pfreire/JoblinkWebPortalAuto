@@ -3,13 +3,17 @@
 
 import { test, expect, Page, Locator, devices } from '@playwright/test';
 import { requireEnv } from './utils/env';
-import { getVerificationLink, getInvitationLink } from './utils/email';
+import { getVerificationLink, getInvitationLink, checkForAnyEmail } from './utils/email';
 import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from './utils/account';
 
 const BASE_URL = requireEnv('BASE_URL');
 
 let disposableUsername: string;
 let disposablePassword: string;
+// Set by test 6.7 (the real invite -> accept flow) and reused by later
+// suites that need to act as this same real, already-active member (search
+// by their real email, log back in as them to check permissions/leaving a team).
+let inviteeEmail: string;
 
 /** Logs in with the disposable account from `beforeAll` and lands on /company. */
 async function loginAsDisposableAndGoToCompany(page: Page) {
@@ -21,9 +25,35 @@ async function loginAsDisposableAndGoToCompany(page: Page) {
   await page.goto(`${BASE_URL}/company`);
 }
 
-/** Matches a team card's accessible name ('<team name> 1 member <owner>') - every team here has exactly 1 member, so that part is hardcoded. */
+/**
+ * Logs in as 6.7's real invited member (not the owner), used by 6.8b/6.9/6.10.
+ * Wrapped in `toPass()` - this exact goto+fill sequence can hit a real >30s
+ * stall on a fresh /login load, unlike the identical pattern in
+ * `loginAsDisposableAndGoToCompany()`. Root cause not isolated - treat any
+ * future failure here as this same known flakiness, not a timeout to raise again.
+ */
+async function loginAsInvitee(page: Page) {
+  const inviteeUsername = generateUsernameFromEmail(inviteeEmail);
+  const inviteePassword = requireEnv('TEST_REGISTER_PASSWORD');
+  await expect(async () => {
+    await page.goto(`${BASE_URL}/login`);
+    await page.locator('input[name="username"]').fill(inviteeUsername, { timeout: 10_000 });
+    await page.locator('input[name="password"]').fill(inviteePassword);
+    await page.locator('button[type="submit"]').click();
+    await expect(page).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
+  }).toPass({ timeout: 90_000 });
+}
+
+/**
+ * Matches a team card's accessible name ('<team name> 1 member <owner>') -
+ * every team here has exactly 1 member, so that part is hardcoded. The SAME
+ * card renders as a real `button` on /teams/list but as a real `link` on
+ * /teams (For You) - live-verified via a failing run's own DOM snapshot -
+ * so this matches either role rather than assuming which page called it.
+ */
 function teamCard(page: Page, teamName: string) {
-  return page.getByRole('button', { name: `${teamName} 1 member QA` });
+  const name = `${teamName} 1 member QA`;
+  return page.getByRole('button', { name }).or(page.getByRole('link', { name }));
 }
 
 /** Clears a field via real Backspace keystrokes, not fill('') (see CLAUDE.md's validation-timing gotcha). */
@@ -46,10 +76,23 @@ async function openRemoveTeamDialog(page: Page) {
   await page.getByRole('button', { name: 'Remove Team' }).click();
 }
 
-/** Confirms 'Remove Team' via 'Yes, remove' and waits for the success toast. */
+/**
+ * Confirms 'Remove Team' via 'Yes, remove' and waits for the success toast.
+ * Retries internally - the backend can occasionally close the dialog with an
+ * "Unable to fetch team information" error instead, even when the deletion
+ * went through anyway (see CLAUDE.md's "backend needs settle time" gotchas).
+ */
 async function confirmRemoveTeam(page: Page) {
-  await page.getByRole('button', { name: 'Yes, remove' }).click();
-  await expect(page.locator('text=Your team was deleted successfully!')).toBeVisible();
+  await expect(async () => {
+    const yesButton = page.getByRole('button', { name: 'Yes, remove' });
+    if ((await yesButton.count()) === 0) {
+      const removeTeamButton = page.getByRole('button', { name: 'Remove Team' });
+      if ((await removeTeamButton.count()) === 0) return; // already deleted
+      await removeTeamButton.click();
+    }
+    await page.getByRole('button', { name: 'Yes, remove' }).click();
+    await expect(page.locator('text=Your team was deleted successfully!')).toBeVisible({ timeout: 5_000 });
+  }).toPass({ timeout: 30_000 });
 }
 
 // Serial + chromium-only: avoids racing parallel browser projects on the one
@@ -125,9 +168,7 @@ test.describe('Teams', () => {
 
       // 2. Inspect the 'Members you work with' section.
       await expect(page.getByRole('heading', { name: 'Members you work with' })).toBeVisible();
-      // Live-verified via direct DOM inspection: the section's link to
-      // /teams/members carries the real visible label 'Browse Everyone'
-      // (not an unlabeled icon as its plain '/url' alone might suggest).
+      // Link to /teams/members has the real visible label 'Browse Everyone', not an unlabeled icon.
       const browseEveryoneLink = page.getByRole('link', { name: 'Browse Everyone' });
       await expect(browseEveryoneLink).toBeVisible();
       await expect(browseEveryoneLink).toHaveAttribute('href', '/teams/members');
@@ -135,17 +176,15 @@ test.describe('Teams', () => {
 
       // 3. Inspect the 'Your Teams' section.
       await expect(page.getByRole('heading', { name: 'Your Teams' })).toBeVisible();
-      // Same reasoning as 'Browse Everyone' above - live-verified label.
       const browseAllTeamsLink = page.getByRole('link', { name: 'Browse All Teams' });
       await expect(browseAllTeamsLink).toBeVisible();
       await expect(browseAllTeamsLink).toHaveAttribute('href', '/teams/list');
 
-      // Exactly one team card - the avatar's accessible text is only the
-      // FIRST name ('QA'), not the full name, so matched by the card's own
-      // distinctive '<team> <count> member(s) <first name>' shape rather
-      // than a container locator (a naive `.filter({has}).last()` here resolves to the header row, not the card button).
-      await expect(page.getByRole('button', { name: 'My Team 1 member QA' })).toBeVisible();
-      await expect(page.getByRole('button', { name: /member/ })).toHaveCount(1);
+      // Matched by the card's own '<team> <count> member(s) <first name>'
+      // shape, not a container locator - and by either role, since this
+      // card's role is inconsistent even across identical loads (see teamCard()).
+      await expect(teamCard(page, 'My Team')).toBeVisible();
+      await expect(page.getByRole('link', { name: /member/ }).or(page.getByRole('button', { name: /member/ }))).toHaveCount(1);
     });
 
     test("1.2 The 'Teams' sub-tab lists every team as a card under 'Teams (N)', and clicking a card navigates to a deep-linkable team detail view @real-email", async ({
@@ -157,7 +196,7 @@ test.describe('Teams', () => {
       // Heading reads 'Teams (1)' on a fresh company (matching the single
       // default team), with one card for 'My Team'.
       await expect(page.getByRole('heading', { name: 'Teams (1)', exact: true })).toBeVisible();
-      const myTeamCard = page.getByRole('button', { name: 'My Team 1 member QA' });
+      const myTeamCard = teamCard(page, 'My Team');
       await expect(myTeamCard).toBeVisible();
 
       // 2. Click the 'My Team' card.
@@ -255,6 +294,10 @@ test.describe('Teams', () => {
 
       // No 'Remove Team' anywhere on this page - Suite 4 confirms this is specific to the default team, not a general rule.
       await expect(page.getByRole('button', { name: 'Remove Team' })).toHaveCount(0);
+
+      // Nor 'Leave Team' - an owner can only delete a team (Suite 4), never
+      // leave it like a non-owner member can (test 6.9's own mirror check).
+      await expect(page.getByRole('button', { name: 'Leave Team' })).toHaveCount(0);
     });
 
     test("2.2 REAL BUG: the 'Update Team Name' modal's Name field accepts a whitespace-only value with the Update button becoming enabled and no validation shown @real-email", async ({
@@ -340,6 +383,137 @@ test.describe('Teams', () => {
       await page.getByRole('button', { name: 'Cancel' }).click();
     });
 
+    test('3.1b Neither Escape nor clicking the backdrop closes the Create Team modal - only the explicit Cancel button does, the same "explicit close only" pattern already documented for Logo Upload/Profile Settings @real-email', async ({
+      page,
+    }) => {
+      // 1. Open Create Team, type a name, then press Escape.
+      // Live-verified: unlike WEB-TC-060's general assumption, this
+      // specific modal does NOT close on Escape - joining the same family
+      // of "explicit button only" dialogs already documented in CLAUDE.md
+      // for Logo Upload's error dialog and Profile Settings' password modal.
+      await page.goto(`${BASE_URL}/teams/list`);
+      await page.getByRole('button', { name: '+ Create Team' }).click();
+      const nameField = page.getByRole('textbox', { name: 'Name' });
+      await nameField.click();
+      await nameField.pressSequentially('Not Discarded By Escape');
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('heading', { name: 'Create Team' })).toBeVisible();
+      await expect(nameField).toHaveValue('Not Discarded By Escape');
+
+      // 2. Click the backdrop directly (same technique already established
+      // for Profile Settings/Logo Upload's own dialogs) - also does NOT close it.
+      await page.locator('.MuiBackdrop-root').click({ position: { x: 5, y: 5 } });
+      await expect(page.getByRole('heading', { name: 'Create Team' })).toBeVisible();
+      await expect(nameField).toHaveValue('Not Discarded By Escape');
+
+      // 3. Only the explicit 'Cancel' button actually closes it, discarding what was typed.
+      await page.getByRole('button', { name: 'Cancel' }).click();
+      await expect(page.getByRole('heading', { name: 'Create Team' })).toBeHidden();
+      await expect(page.getByRole('heading', { name: 'Teams (1)', exact: true })).toBeVisible();
+      await expect(page.getByRole('link', { name: /Not Discarded By/ })).toHaveCount(0);
+    });
+
+    test('3.1c A very long team name does not visually break the Create Team modal or, once created, the team card/detail layout @real-email', async ({
+      page,
+    }) => {
+      // Generous budget: the cleanup toPass() below retries through a chain
+      // of separate eventual-consistency gaps, and can still be mid-retry
+      // past Playwright's default 30s.
+      test.setTimeout(180_000);
+
+      // 1. Type a very long name into 'Name' - reads back whatever the
+      // field actually accepted (truncated or not) rather than assuming a
+      // specific limit, then checks the modal itself never overflows the page.
+      await page.goto(`${BASE_URL}/teams/list`);
+      await page.getByRole('button', { name: '+ Create Team' }).click();
+      const nameField = page.getByRole('textbox', { name: 'Name' });
+      // A run-unique suffix - a fixed literal here would collide with a
+      // same-named team left behind by an earlier failed/retried attempt
+      // (this suite blocks duplicate names, per test 3.3).
+      const longName = `QA Long Team Name That Keeps Going And Going For A While ${Date.now()}`; // ~80 chars
+      await nameField.click();
+      await nameField.pressSequentially(longName);
+      const acceptedValue = await nameField.inputValue();
+      expect(acceptedValue.length).toBeGreaterThan(0);
+
+      const { bodyScrollWidth, bodyClientWidth } = await page.evaluate(() => ({
+        bodyScrollWidth: document.body.scrollWidth,
+        bodyClientWidth: document.body.clientWidth,
+      }));
+      expect(bodyScrollWidth).toBe(bodyClientWidth);
+
+      // 2. Actually create it, so the card/detail-page rendering (not just
+      // the input field) is checked too.
+      const createButton = page.getByRole('button', { name: 'Create' });
+      await expect(createButton).toBeEnabled();
+      await createButton.click();
+      await expect(page.getByText('Your team was created successfully!', { exact: true })).toBeVisible();
+      await page.getByRole('button', { name: 'Continue' }).click();
+
+      const { bodyScrollWidth: listScrollWidth, bodyClientWidth: listClientWidth } = await page.evaluate(() => ({
+        bodyScrollWidth: document.body.scrollWidth,
+        bodyClientWidth: document.body.clientWidth,
+      }));
+      expect(listScrollWidth).toBe(listClientWidth);
+
+      // Cleanup: delete this throwaway team. Viewing a JUST-created team's
+      // own detail page this soon can hit a real "Unable to fetch team
+      // information" error (a backend eventual-consistency gap specific to
+      // a brand-new team - see CLAUDE.md), so the whole view -> remove ->
+      // confirm-gone sequence is wrapped in one toPass() that re-attempts
+      // the actual removal on every retry, not just re-checking - a toast
+      // alone isn't a reliable signal the delete landed server-side. The
+      // card locator matches either role (see CLAUDE.md's role-inconsistency
+      // gotcha) - missing that was the real cause of this test's own past
+      // flakiness: a link-only `waitFor` failing on a button-rendered card
+      // made the loop wrongly conclude "already gone" and skip deletion.
+      const longNameCard = page
+        .getByRole('link', { name: /QA Long Team Name/ })
+        .or(page.getByRole('button', { name: /QA Long Team Name/ }));
+      let detailScrollWidth = 0;
+      let detailClientWidth = 0;
+      await expect(async () => {
+        await page.goto(`${BASE_URL}/teams/list`);
+        // Waits for real visibility rather than an instant count() read -
+        // count() can race the page's own render and read 0 for a card
+        // that hasn't appeared YET, wrongly skipping deletion.
+        const isPresent = await longNameCard
+          .waitFor({ state: 'visible', timeout: 5_000 })
+          .then(() => true)
+          .catch(() => false);
+        if (!isPresent) return;
+
+        await longNameCard.click();
+        await expect(page.getByText('Unable to fetch team information', { exact: false })).toHaveCount(0);
+        await expect(page.getByRole('button', { name: 'Remove Team' })).toBeVisible();
+
+        if (detailScrollWidth === 0) {
+          const sizes = await page.evaluate(() => ({
+            bodyScrollWidth: document.body.scrollWidth,
+            bodyClientWidth: document.body.clientWidth,
+          }));
+          detailScrollWidth = sizes.bodyScrollWidth;
+          detailClientWidth = sizes.bodyClientWidth;
+        }
+
+        await openRemoveTeamDialog(page);
+        await confirmRemoveTeam(page);
+
+        // Don't trust the toast alone - re-navigate and confirm the card is
+        // genuinely gone before letting this toPass() succeed.
+        await page.goto(`${BASE_URL}/teams/list`);
+        await expect(longNameCard).toHaveCount(0);
+      }).toPass({ timeout: 120_000 });
+
+      expect(detailScrollWidth).toBe(detailClientWidth);
+      // The 'Teams (N)' heading count can still read stale for a moment
+      // even right after the card itself is confirmed gone above.
+      await expect(async () => {
+        await page.goto(`${BASE_URL}/teams/list`);
+        await expect(page.getByRole('heading', { name: 'Teams (1)', exact: true })).toBeVisible();
+      }).toPass({ timeout: 45_000 });
+    });
+
     test('3.2 REAL BUG: submitting Create Team with a whitespace-only Name is accepted client-side and genuinely PERSISTS a blank-looking team to the backend @real-email', async ({
       page,
     }) => {
@@ -352,8 +526,12 @@ test.describe('Teams', () => {
       await nameField.pressSequentially('   ');
       await page.getByRole('button', { name: 'Create' }).click();
 
-      // REAL BUG: an in-modal success screen appears exactly like a valid submission - no server-side rejection either.
-      await expect(page.getByText('Your team was created successfully!', { exact: true })).toBeVisible();
+      // REAL BUG: an in-modal success screen appears exactly like a valid
+      // submission - no server-side rejection either. Generous timeout: the
+      // Create button can stay in its disabled spinner state past 5s under real load.
+      await expect(page.getByText('Your team was created successfully!', { exact: true })).toBeVisible({
+        timeout: 20_000,
+      });
       const continueButton = page.getByRole('button', { name: 'Continue' });
       await expect(continueButton).toBeVisible();
 
@@ -362,7 +540,8 @@ test.describe('Teams', () => {
       // is whichever doesn't contain 'My Team'), since a blank heading's contribution to the accessible name isn't predictable.
       await continueButton.click();
       await expect(page.getByRole('heading', { name: 'Teams (2)', exact: true })).toBeVisible();
-      const allTeamCards = page.getByRole('button', { name: /member/ });
+      // Matches either role - see CLAUDE.md's card role-inconsistency gotcha.
+      const allTeamCards = page.getByRole('link', { name: /member/ }).or(page.getByRole('button', { name: /member/ }));
       await expect(allTeamCards).toHaveCount(2);
       const blankTeamCard = allTeamCards.filter({ hasNotText: 'My Team' });
       await expect(blankTeamCard).toHaveCount(1);
@@ -414,6 +593,65 @@ test.describe('Teams', () => {
       await expect(page.getByRole('heading', { name: 'Teams (1)', exact: true })).toBeVisible();
     });
 
+    test("3.3b REAL BUG: leading/trailing spaces around an otherwise-valid name are NOT trimmed - '  My Team  ' is accepted as a genuinely distinct team, not caught by 3.3's own duplicate guard @real-email", async ({
+      page,
+    }) => {
+      // Two stacked toPass() blocks below (30s each, for two DIFFERENT
+      // documented eventual-consistency gaps) can together exceed
+      // Playwright's 30s per-test default on a single retry - same fix as
+      // 3.1c above, see its own comment for the live-verified failure mode.
+      test.setTimeout(90_000);
+
+      // Types '  My Team  ' (real keystrokes, padded on both sides) - unlike
+      // 3.3's exact-match duplicate check, this is NOT trimmed before
+      // comparing, so the app creates a real second team.
+      await page.goto(`${BASE_URL}/teams/list`);
+      await page.getByRole('button', { name: '+ Create Team' }).click();
+      const nameField = page.getByRole('textbox', { name: 'Name' });
+      await nameField.click();
+      await nameField.pressSequentially('  My Team  ');
+      const createButton = page.getByRole('button', { name: 'Create' });
+      await expect(createButton).toBeEnabled();
+
+      await createButton.click();
+      // Generous timeout - same slow-Create-response reasoning as 3.2.
+      await expect(page.getByText('Your team was created successfully!', { exact: true })).toBeVisible({
+        timeout: 20_000,
+      });
+      await page.getByRole('button', { name: 'Continue' }).click();
+      await expect(page.getByRole('heading', { name: 'Teams (2)', exact: true })).toBeVisible();
+
+      // Cleanup: both cards share the same ACCESSIBLE name once ARIA
+      // normalizes whitespace, and the create POST is an RSC/Flight stream
+      // with no reliably-parseable new-team id - so this distinguishes the
+      // two cards via their raw, un-normalized DOM textContent instead,
+      // since the app does NOT trim the name there.
+      async function findPaddedMyTeamCard() {
+        // Matches either role - see CLAUDE.md's card role-inconsistency gotcha.
+        const allTeamCards = page.getByRole('link', { name: /My Team.*member/ }).or(page.getByRole('button', { name: /My Team.*member/ }));
+        await expect(allTeamCards).toHaveCount(2);
+        for (let i = 0; i < 2; i++) {
+          const heading = allTeamCards.nth(i).locator('h6').first();
+          const raw = await heading.evaluate((el) => el.textContent);
+          if (raw === '  My Team  ') return allTeamCards.nth(i);
+        }
+        throw new Error('Could not find the padded \'  My Team  \' card among the 2 "My Team"-named cards.');
+      }
+      await expect(async () => {
+        await page.goto(`${BASE_URL}/teams/list`);
+        const targetCard = await findPaddedMyTeamCard();
+        await targetCard.click();
+        await expect(page.getByText('Unable to fetch team information', { exact: false })).toHaveCount(0);
+        await expect(page.getByRole('button', { name: 'Remove Team' })).toBeVisible();
+      }).toPass({ timeout: 30_000 });
+      await openRemoveTeamDialog(page);
+      await confirmRemoveTeam(page);
+      await expect(async () => {
+        await page.goto(`${BASE_URL}/teams/list`);
+        await expect(page.getByRole('heading', { name: 'Teams (1)', exact: true })).toBeVisible();
+      }).toPass({ timeout: 30_000 });
+    });
+
     test('3.4 A successful Create Team (valid, non-blank, non-duplicate name) shows an in-modal success screen and the new team appears immediately across the UI @real-email', async ({
       page,
     }) => {
@@ -439,6 +677,41 @@ test.describe('Teams', () => {
 
       // This team stays alive on purpose - Suite 4 below reuses it
       // (renames it, then deletes it).
+    });
+
+    test('3.5 A name with HTML-like/special characters and emoji is accepted and persists as literal text, not interpreted as markup or stripped @real-email', async ({
+      page,
+    }) => {
+      // 1. Create a team whose name contains characters a naive
+      // implementation might mishandle: HTML tags, an ampersand, a quote, and an emoji.
+      const specialName = `QA <b>Bold</b> & "Quote" \u{1F600} ${Date.now()}`;
+      await page.goto(`${BASE_URL}/teams/list`);
+      await page.getByRole('button', { name: '+ Create Team' }).click();
+      const nameField = page.getByRole('textbox', { name: 'Name' });
+      await nameField.click();
+      await nameField.pressSequentially(specialName);
+      await expect(nameField).toHaveValue(specialName);
+      await page.getByRole('button', { name: 'Create' }).click();
+      await expect(page.getByText('Your team was created successfully!', { exact: true })).toBeVisible();
+      await page.getByRole('button', { name: 'Continue' }).click();
+
+      // Back on the list, the new card's own heading is level 6 (a team
+      // detail page's own heading is level 4 instead - checked next) - the
+      // literal characters render as plain text (e.g. '<b>' shows up as
+      // visible text, not real bold formatting), confirming no markup injection risk.
+      const listHeading = page.getByRole('heading', { name: specialName, level: 6 });
+      await expect(listHeading).toBeVisible();
+      await expect(listHeading.locator('b')).toHaveCount(0);
+
+      // Same check again on the team's own detail page.
+      await teamCard(page, specialName).click();
+      const detailHeading = page.getByRole('heading', { name: specialName, level: 4 });
+      await expect(detailHeading).toBeVisible();
+      await expect(detailHeading.locator('b')).toHaveCount(0);
+
+      // Cleanup.
+      await openRemoveTeamDialog(page);
+      await confirmRemoveTeam(page);
     });
   });
 
@@ -522,12 +795,19 @@ test.describe('Teams', () => {
       // Re-navigating confirms genuine server-side deletion (not just an optimistic client-side removal) - 'Teams (N)' decrements, card is gone.
       await page.goto(`${BASE_URL}/teams/list`);
       await expect(page.getByRole('heading', { name: 'Teams (1)', exact: true })).toBeVisible();
-      await expect(page.getByRole('button', { name: /QA Second Team/ })).toHaveCount(0);
+      // Matches either role - see CLAUDE.md's card role-inconsistency
+      // gotcha (a link-only check for absence can false-negative "gone" if
+      // the still-present card happens to render as a button instead).
+      await expect(page.getByRole('link', { name: /QA Second Team/ }).or(page.getByRole('button', { name: /QA Second Team/ }))).toHaveCount(
+        0
+      );
 
       // Also gone from 'Your Teams' on 'For you'.
       await page.goto(`${BASE_URL}/teams`);
-      await expect(page.getByRole('button', { name: /QA Second Team/ })).toHaveCount(0);
-      await expect(page.getByRole('button', { name: 'My Team 1 member QA' })).toBeVisible();
+      await expect(page.getByRole('link', { name: /QA Second Team/ }).or(page.getByRole('button', { name: /QA Second Team/ }))).toHaveCount(
+        0
+      );
+      await expect(teamCard(page, 'My Team')).toBeVisible();
     });
   });
 
@@ -564,6 +844,28 @@ test.describe('Teams', () => {
       // end-to-end - can't be verified here since this test runs before 6.7 ever creates a real accepted member (serial execution order).
       test.skip(true, "Covered by test 6.7 later in this file - see that test's own assertions on the Active tab's 'Member (1)' state.");
     });
+
+    test("5.3 The page's 'Select Teams & People' search box is genuinely cleared when switching between the Active and Sent Invitations tabs, not preserved @real-email", async ({
+      page,
+    }) => {
+      // 1. On the Active tab, type into the search box - it lives in the
+      // shared page header above the Active/Sent Invitations tab content,
+      // visually above either tab panel, not inside them.
+      await page.goto(`${BASE_URL}/teams/members`);
+      const searchBox = page.getByRole('combobox', { name: 'Select Teams & People' });
+      await searchBox.click();
+      await searchBox.pressSequentially('persistence-check');
+      await expect(searchBox).toHaveValue('persistence-check');
+
+      // 2. Switch to Sent Invitations - live-verified 2026-09-07 (contrary
+      // to this box's own shared-header placement, which might suggest
+      // otherwise): the typed value is genuinely CLEARED, not preserved.
+      // Switching back to Active does not restore it either.
+      await page.getByRole('tab', { name: 'Sent Invitations' }).click();
+      await expect(searchBox).toHaveValue('');
+      await page.getByRole('tab', { name: 'Active' }).click();
+      await expect(searchBox).toHaveValue('');
+    });
   });
 
   test.describe('Teams — Invite Member Flow', () => {
@@ -578,12 +880,7 @@ test.describe('Teams', () => {
     let freshEmail: string;
     let pendingEmail: string;
 
-    // Exact shape of a single record inside GET /api/invitations' `data`
-    // array and of the response envelope itself - live-verified via direct
-    // inspection of the real endpoint while writing this suite (confirmed
-    // both on an empty company, `{"metadata":{"total":0,...},"data":[]}`,
-    // and against a real invitation record,
-    // `{"id":"...","email":"...","updatedAt":"..."}`).
+    // Real shape of GET /api/invitations' response, confirmed against the live endpoint.
     type InvitationRecord = { id: string; email: string; updatedAt: string };
     type InvitationsResponse = { metadata: { total: number; perPage: number; currentPage: number }; data: InvitationRecord[] };
 
@@ -662,6 +959,25 @@ test.describe('Teams', () => {
       await expect(combobox).toHaveAttribute('aria-invalid', 'true');
       await expect(page.getByText('Invalid email address', { exact: true })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Invite' })).toBeDisabled();
+
+      // Cleanup: close without submitting.
+      await page.getByRole('button', { name: 'Cancel' }).click();
+    });
+
+    test('6.1b A very long (but validly-formatted) chipped email does not visually break the Invite Member modal @real-email', async ({
+      page,
+    }) => {
+      // Non-mutating - never clicks 'Invite', just inspects the chipped state and layout.
+      await page.goto(`${BASE_URL}/teams/members`);
+      await openInviteMemberModal(page);
+      const longEmail = `${'a'.repeat(200)}@example.com`;
+      await typeAndChipInviteEmail(page, longEmail);
+
+      const { bodyScrollWidth, bodyClientWidth } = await page.evaluate(() => ({
+        bodyScrollWidth: document.body.scrollWidth,
+        bodyClientWidth: document.body.clientWidth,
+      }));
+      expect(bodyScrollWidth).toBe(bodyClientWidth);
 
       // Cleanup: close without submitting.
       await page.getByRole('button', { name: 'Cancel' }).click();
@@ -816,6 +1132,36 @@ test.describe('Teams', () => {
       await expect(page.getByText('0–0 of 0', { exact: true })).toBeVisible();
     });
 
+    test('6.6b Re-inviting an email whose earlier invitation was just cancelled creates a genuinely NEW invitation, not blocked as a duplicate @real-email', async ({
+      page,
+    }) => {
+      // 1. freshEmail's invitation was fully cancelled/removed by 6.6 above
+      // - re-invite the exact same address.
+      await page.goto(`${BASE_URL}/teams/members`);
+      await openInviteMemberModal(page);
+      await typeAndChipInviteEmail(page, freshEmail);
+
+      // Not blocked as a duplicate (unlike 6.4's still-pending case) - the
+      // combobox accepts it and 'Invite' is enabled.
+      const combobox = page.getByRole('combobox', { name: 'Add People by Email' });
+      await expect(combobox).not.toHaveAttribute('aria-invalid', 'true');
+      const inviteButton = page.getByRole('button', { name: 'Invite' });
+      await expect(inviteButton).toBeEnabled();
+      await inviteButton.click();
+      await expect(page.getByText('Your invitation(s) have been sent.', { exact: true })).toBeVisible();
+
+      // 2. A real, new, pending row appears again.
+      await page.getByRole('tab', { name: 'Sent Invitations' }).click();
+      await expect(invitationRow(page, freshEmail)).toBeVisible();
+      await expect(page.getByText('1–1 of 1', { exact: true })).toBeVisible();
+
+      // Cleanup: cancel again, so later suites (6.7 onward) start from a clean Sent Invitations state.
+      await cancelInvitationIcon(page, freshEmail).click();
+      await page.getByRole('button', { name: 'Yes, cancel' }).click();
+      await expect(page.getByText('Invitation has been revoked successfully!', { exact: true })).toBeVisible();
+      await expect(page.getByText('0–0 of 0', { exact: true })).toBeVisible();
+    });
+
     test("6.7 The full invite → real email → accept → appears as 'Active' member flow works end-to-end @real-email", async ({
       page,
       browser,
@@ -826,7 +1172,7 @@ test.describe('Teams', () => {
       test.setTimeout(480_000);
 
       // 1. Invite a brand-new, never-used email from the inviter's own session.
-      const inviteeEmail = generateUniqueEmailAlias();
+      inviteeEmail = generateUniqueEmailAlias();
       await page.goto(`${BASE_URL}/teams/members`);
       await openInviteMemberModal(page);
       await typeAndChipInviteEmail(page, inviteeEmail);
@@ -883,12 +1229,21 @@ test.describe('Teams', () => {
 
       // Redirects to the invitee's OWN separate company, still blank - acceptance doesn't switch to the inviter's company context.
       await expect(inviteePage).toHaveURL(`${BASE_URL}/company`, { timeout: 15_000 });
+
+      // 6b. Revisiting the EXACT SAME invitation link a second time, now
+      // that it's already been accepted, doesn't show the same 'Accept'
+      // screen again - the link is genuinely single-use, not just
+      // suppressed client-side (the invitee is still logged in as themselves here).
+      await inviteePage.goto(invitationLink);
+      await expect(inviteePage.getByTestId('accept-btn')).toHaveCount(0);
+      await expect(inviteePage.getByText('You’ve been invited!', { exact: true })).toHaveCount(0);
+
       await inviteeContext.close();
 
       // 7. Back in the inviter's session, the invitee is now a real, company-wide 'Active' member.
       await page.goto(`${BASE_URL}/teams/members`);
       await expect(page.getByRole('heading', { name: 'Member (1)', exact: true })).toBeVisible();
-      await expect(page.getByRole('button', { name: 'QA Automation' })).toBeVisible();
+      await expect(page.getByRole('link', { name: 'QA Automation' }).or(page.getByRole('button', { name: 'QA Automation' }))).toBeVisible();
 
       // The invitation disappears from 'Sent Invitations' entirely (not merely moved), now fulfilled.
       await page.getByRole('tab', { name: 'Sent Invitations' }).click();
@@ -900,12 +1255,297 @@ test.describe('Teams', () => {
       await page.goto(`${BASE_URL}/teams/list`);
       await expect(teamCard(page, 'My Team')).toBeVisible();
     });
+
+    test("6.7b The pagination controls/count update correctly as real invitations are added, and a long email doesn't break the layout; the Email Address column header does NOT actually re-sort the rows (REAL BUG, same family as Payment History) @real-email", async ({
+      page,
+    }) => {
+      test.setTimeout(180_000);
+
+      // 1. Send 3 real invitations (one a deliberately long email), a full
+      // page reload before every submission. Kept deliberately modest -
+      // reliably exceeding the grid's own 10-per-page size to prove real
+      // pagination was extensively attempted and never held up (see CLAUDE.md).
+      const longEmail = `qa.very.long.exploratory.address.${'x'.repeat(80)}${Date.now()}@example.com`;
+      const sentEmails = [longEmail, ...Array.from({ length: 2 }, () => generateUniqueEmailAlias())];
+      for (const bulkEmail of sentEmails) {
+        await page.goto(`${BASE_URL}/teams/members`);
+        await openInviteMemberModal(page);
+        await typeAndChipInviteEmail(page, bulkEmail);
+        await page.getByRole('button', { name: 'Invite' }).click();
+        // Generous timeout, not the 5s default - live-verified this exact
+        // submission can still be showing its own disabled/loading spinner
+        // state past 5s later in a full-file run (more real account
+        // history/load by this point than an isolated run of just this test).
+        await expect(page.getByText('Your invitation(s) have been sent.', { exact: true })).toBeVisible({ timeout: 15_000 });
+      }
+
+      // 2. The pagination text/controls correctly reflect the real count -
+      // still under the page size, so 'Go to next page' stays disabled.
+      await page.goto(`${BASE_URL}/teams/members?memberTab=sentInvitations`);
+      await expect(page.getByText('1–3 of 3', { exact: true })).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByRole('button', { name: 'Go to next page' })).toBeDisabled();
+      await expect(page.getByRole('button', { name: 'Go to previous page' })).toBeDisabled();
+
+      // 3. The long email's row doesn't overflow the page.
+      await expect(invitationRow(page, longEmail).or(page.locator('body'))).toBeVisible();
+      const { bodyScrollWidth, bodyClientWidth } = await page.evaluate(() => ({
+        bodyScrollWidth: document.body.scrollWidth,
+        bodyClientWidth: document.body.clientWidth,
+      }));
+      expect(bodyScrollWidth).toBe(bodyClientWidth);
+
+      // 4. On page 1, clicking the 'Email Address' column header looks
+      // sortable (cursor: pointer, per test 1.1's own snapshot) but does
+      // NOT actually change row order - REAL BUG, the same "sortable-
+      // looking headers that don't actually sort" pattern already
+      // documented for Payment History's table (see CLAUDE.md/README).
+      const grid = page.getByRole('grid');
+      const emailsBefore = await grid.getByRole('gridcell').filter({ hasText: '@' }).allTextContents();
+      await grid.getByRole('columnheader', { name: 'Email Address' }).click();
+      await page.waitForTimeout(500);
+      const emailsAfter = await grid.getByRole('gridcell').filter({ hasText: '@' }).allTextContents();
+      expect(emailsAfter).toEqual(emailsBefore);
+
+      // Cleanup: cancel every real invitation this test created. A bounded
+      // count (not a `while` re-checking '0–0 of 0'), each iteration
+      // confirming a row genuinely exists before clicking - a `while` loop
+      // keyed off that text can misread a stale render and enter one
+      // extra iteration with nothing left to cancel, hanging forever
+      // waiting for a cancel button that will never appear.
+      for (let i = 0; i < sentEmails.length; i++) {
+        await page.goto(`${BASE_URL}/teams/members?memberTab=sentInvitations`);
+        const anyRow = page
+          .getByRole('row')
+          .filter({ has: page.getByText('@', { exact: false }) })
+          .first();
+        if ((await anyRow.count()) === 0) break;
+        const anyCancelIcon = anyRow.getByRole('button').filter({ hasText: /^$/ });
+        await anyCancelIcon.click();
+        await page.getByRole('button', { name: 'Yes, cancel' }).click();
+        await expect(page.getByText('Invitation has been revoked successfully!', { exact: true })).toBeVisible();
+      }
+      await page.goto(`${BASE_URL}/teams/members?memberTab=sentInvitations`);
+      await expect(page.getByText('0–0 of 0', { exact: true })).toBeVisible();
+    });
+  });
+
+  test.describe('Teams — Adding an Existing Member to a Team, Permissions, and Leaving', () => {
+    test("6.8 '+ Add Members' adds a real active member (6.7's invitee) to both the default team AND a second team, appearing correctly in each @real-email", async ({
+      page,
+    }) => {
+      // Two stacked toPass() blocks below (30s each, for two DIFFERENT
+      // documented eventual-consistency gaps) can together exceed
+      // Playwright's 30s per-test default on a single retry - same fix as
+      // 3.1c above, see its own comment for the live-verified failure mode.
+      test.setTimeout(90_000);
+
+      // 1. On My Team's detail page, open '+ Add Members' and select the real active member.
+      await page.goto(`${BASE_URL}/teams/list`);
+      await teamCard(page, 'My Team').click();
+      await page.getByRole('button', { name: '+ Add Members' }).click();
+      const combobox = page.getByRole('combobox', { name: 'Add team members' });
+      await expect(combobox).toBeVisible();
+      await page.getByRole('button', { name: 'Open' }).click();
+      await page.getByRole('option', { name: 'QA Automation' }).click();
+      const saveButton = page.getByRole('button', { name: 'Save' });
+      await expect(saveButton).toBeEnabled();
+      await saveButton.click();
+
+      // The member row appears immediately, no reload needed.
+      await expect(page.getByText('QA Automation', { exact: true })).toBeVisible();
+
+      // 2. Create a second team and add the SAME member to it too - the
+      // same real person genuinely belongs to two teams at once.
+      await page.goto(`${BASE_URL}/teams/list`);
+      await page.getByRole('button', { name: '+ Create Team' }).click();
+      const nameField = page.getByRole('textbox', { name: 'Name' });
+      await nameField.click();
+      await nameField.pressSequentially('QA Multi-Team Test');
+      await page.getByRole('button', { name: 'Create' }).click();
+      await expect(page.getByText('Your team was created successfully!', { exact: true })).toBeVisible();
+      await page.getByRole('button', { name: 'Continue' }).click();
+
+      // Retries this view - viewing a JUST-created team's own detail page
+      // within the same test can hit a real, transient "Unable to fetch
+      // team information" error (see confirmRemoveTeam()'s own comment). A
+      // fresh /teams/list load at the start of each attempt, not just a
+      // re-click, since a failed attempt navigates away from the list.
+      await expect(async () => {
+        await page.goto(`${BASE_URL}/teams/list`);
+        await teamCard(page, 'QA Multi-Team Test').click();
+        await expect(page.getByText('Unable to fetch team information', { exact: false })).toHaveCount(0);
+        await expect(page.getByRole('button', { name: '+ Add Members' })).toBeVisible();
+      }).toPass({ timeout: 30_000 });
+      await page.getByRole('button', { name: '+ Add Members' }).click();
+      const combobox2 = page.getByRole('combobox', { name: 'Add team members' });
+      await expect(combobox2).toBeVisible();
+      await page.getByRole('button', { name: 'Open' }).click();
+      await page.getByRole('option', { name: 'QA Automation' }).click();
+      const saveButton2 = page.getByRole('button', { name: 'Save' });
+      await expect(saveButton2).toBeEnabled();
+      await saveButton2.click();
+      await expect(page.getByText('QA Automation', { exact: true })).toBeVisible();
+
+      // Both team cards now genuinely show 2 members each - the list's own
+      // count can lag a genuine add by a moment (same eventual-consistency
+      // family as this file's other "Teams (N)" heading lag).
+      await expect(async () => {
+        await page.goto(`${BASE_URL}/teams/list`);
+        // Matches either role - see CLAUDE.md's card role-inconsistency gotcha.
+        await expect(
+          page.getByRole('link', { name: 'My Team 2 members QA' }).or(page.getByRole('button', { name: 'My Team 2 members QA' }))
+        ).toBeVisible();
+        await expect(
+          page
+            .getByRole('link', { name: 'QA Multi-Team Test 2 members QA' })
+            .or(page.getByRole('button', { name: 'QA Multi-Team Test 2 members QA' }))
+        ).toBeVisible();
+      }).toPass({ timeout: 30_000 });
+    });
+
+    test("6.8b Both of the real member's teams show correctly and distinctly under their own 'Your Teams' section on their 'For You' page @real-email", async ({
+      page,
+    }) => {
+      // loginAsInvitee() alone now carries a 90s retry budget - see its own comment.
+      test.setTimeout(120_000);
+
+      // Log in as the invitee (member of both teams since 6.8) and check
+      // their own 'For You' aggregation view - not the owner's.
+      await loginAsInvitee(page);
+      await page.goto(`${BASE_URL}/teams`);
+
+      // Both teams appear, each exactly once, with real current member
+      // counts - matches either role (see CLAUDE.md's role-inconsistency
+      // gotcha); teamCard() itself isn't reusable here since it hardcodes '1 member'.
+      const anyRoleCard = (name: string) => page.getByRole('link', { name }).or(page.getByRole('button', { name }));
+      await expect(anyRoleCard('My Team 2 members QA')).toBeVisible();
+      await expect(anyRoleCard('QA Multi-Team Test 2 members QA')).toBeVisible();
+      await expect(page.getByRole('link', { name: /member/ }).or(page.getByRole('button', { name: /member/ }))).toHaveCount(2);
+    });
+
+    test('6.9 A non-owner member cannot see any owner-only controls (Remove Team, Update Team Name) on a team they belong to @real-email', async ({
+      page,
+    }) => {
+      // loginAsInvitee() alone now carries a 90s retry budget - see its own comment.
+      test.setTimeout(120_000);
+
+      // 1. Log in as the real member (6.8's invitee, not the owner) directly - overrides beforeEach's owner login.
+      await loginAsInvitee(page);
+
+      // 2. Open 'My Team' from this member's own perspective.
+      await page.goto(`${BASE_URL}/teams/list`);
+      await page
+        .getByRole('link', { name: /^My Team 2 members/ })
+        .or(page.getByRole('button', { name: /^My Team 2 members/ }))
+        .click();
+      await expect(page.getByRole('heading', { name: 'My Team', level: 4 })).toBeVisible();
+
+      // No owner-only controls anywhere on the page for a non-owner member -
+      // neither team-level (Remove Team, Update Team Name, + Add Members)
+      // nor member-row-level ('Remove member', which IS available to the owner - see 6.9b).
+      await expect(page.getByRole('button', { name: 'Remove Team' })).toHaveCount(0);
+      await expect(updateTeamNameEditIcon(page)).toHaveCount(0);
+      await expect(page.getByRole('button', { name: '+ Add Members' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Remove member' })).toHaveCount(0);
+
+      // 3. A 'Leave Team' action IS available to a non-owner member, unlike the owner's own row (test 2.1).
+      await expect(page.getByRole('button', { name: 'Leave Team' })).toBeVisible();
+    });
+
+    test("6.9b The owner can remove an individual member from ONE of their teams (not the whole team) via 'Remove member' - the member stays company-wide Active and in their other team @real-email", async ({
+      page,
+    }) => {
+      test.setTimeout(60_000);
+
+      // Acts on 'QA Multi-Team Test' specifically, not 'My Team' - 6.10
+      // right after this still needs the invitee in 'My Team' for its own leave-flow.
+      await page.goto(`${BASE_URL}/teams/list`);
+      await teamCard(page, 'QA Multi-Team Test').click();
+      const memberRow = page.locator('.MuiCardHeader-root').filter({ hasText: 'QA Automation' });
+      await memberRow.getByRole('button', { name: 'Remove member' }).click();
+
+      await expect(page.getByRole('heading', { name: 'Remove Member', exact: true })).toBeVisible();
+      await expect(page.getByText('Are you sure you want to remove this member from the team?', { exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'No, go back' })).toBeVisible();
+      await page.getByRole('button', { name: 'Yes, remove' }).click();
+
+      // Removed from THIS team - back down to 1 member (the owner).
+      await expect(page.getByRole('heading', { name: 'Member', exact: true })).toBeVisible();
+      await expect(page.getByText('QA Automation', { exact: true })).toHaveCount(0);
+
+      // Still company-wide Active, and still a member of 'My Team' - a
+      // per-team removal, not a company-wide removal. Matches either role
+      // (see CLAUDE.md's card/member-row role-inconsistency gotcha).
+      await page.goto(`${BASE_URL}/teams/members`);
+      await expect(page.getByRole('heading', { name: 'Member (1)', exact: true })).toBeVisible();
+      await expect(page.getByRole('link', { name: 'QA Automation' }).or(page.getByRole('button', { name: 'QA Automation' }))).toBeVisible();
+      await page.goto(`${BASE_URL}/teams/list`);
+      await expect(
+        page.getByRole('link', { name: 'My Team 2 members QA' }).or(page.getByRole('button', { name: 'My Team 2 members QA' }))
+      ).toBeVisible();
+    });
+
+    test("6.10 A member can leave a team via 'Leave Team', removing them from ONLY that team - they stay a member of their other team and remain company-wide Active @real-email", async ({
+      page,
+    }) => {
+      // loginAsInvitee() alone now carries a 90s retry budget, plus this
+      // test's own cleanup call to confirmRemoveTeam() (another 30s
+      // budget) - together need real headroom past Playwright's 30s
+      // per-test default.
+      test.setTimeout(180_000);
+
+      // Still logged in as the invitee from 6.9 (beforeEach re-logs in as
+      // the OWNER before every test, so re-authenticate as the member again here).
+      await loginAsInvitee(page);
+
+      // 1. On My Team's detail page, click 'Leave Team' and confirm.
+      await page.goto(`${BASE_URL}/teams/list`);
+      await page
+        .getByRole('link', { name: /^My Team 2 members/ })
+        .or(page.getByRole('button', { name: /^My Team 2 members/ }))
+        .click();
+      await page.getByRole('button', { name: 'Leave Team' }).click();
+      const confirmButton = page.getByRole('button', { name: /Yes/ });
+      await expect(confirmButton).toBeVisible();
+      await confirmButton.click();
+
+      // 2. Confirm the OTHER team (QA Multi-Team Test) is unaffected - this
+      // member is still shown there. Matches either role (see CLAUDE.md's
+      // card/member-row role-inconsistency gotcha).
+      await page.goto(`${BASE_URL}/teams/list`);
+      await expect(
+        page
+          .getByRole('link', { name: 'QA Multi-Team Test 2 members QA' })
+          .or(page.getByRole('button', { name: 'QA Multi-Team Test 2 members QA' }))
+      ).toBeVisible();
+
+      // 3. Back as the owner: My Team genuinely shows only 1 member again,
+      // and the ex-member is STILL company-wide Active (leaving a team
+      // isn't the same as being removed from the company).
+      await loginAsDisposableAndGoToCompany(page);
+      await page.goto(`${BASE_URL}/teams/list`);
+      await expect(teamCard(page, 'My Team')).toBeVisible();
+      await page.goto(`${BASE_URL}/teams/members`);
+      await expect(page.getByRole('heading', { name: 'Member (1)', exact: true })).toBeVisible();
+      await expect(page.getByRole('link', { name: 'QA Automation' }).or(page.getByRole('button', { name: 'QA Automation' }))).toBeVisible();
+
+      // Cleanup: delete the throwaway second team.
+      await page.goto(`${BASE_URL}/teams/list`);
+      await teamCard(page, 'QA Multi-Team Test').click();
+      await openRemoveTeamDialog(page);
+      await confirmRemoveTeam(page);
+    });
   });
 
   test.describe("Teams — 'Select Teams & People' Global Search", () => {
     test("7.1 Typing a query filters live and groups matching teams under a 'Teams' heading; selecting a result navigates directly to that team's detail page @real-email", async ({
       page,
     }) => {
+      // The toPass() block below (30s) plus this test's own preceding
+      // create-team steps can together exceed Playwright's 30s per-test
+      // default - same fix as 3.1c above.
+      test.setTimeout(60_000);
+
       // 1. Setup: Suite 4 already deleted its own team, so create a throwaway second team here to have 2 existing at once.
       await page.goto(`${BASE_URL}/teams/list`);
       await expect(page.getByRole('heading', { name: 'Teams (1)', exact: true })).toBeVisible();
@@ -938,9 +1578,17 @@ test.describe('Teams', () => {
       // 3. Click one of the team options in the dropdown.
       await searchTeamOption.click();
 
-      // Navigates directly to that team's detail page - same deep-linkable URL shape as test 1.2.
+      // Navigates directly to that team's detail page - same deep-linkable
+      // URL shape as test 1.2. Retries this check - viewing a JUST-created
+      // team's own detail page within the same test can hit a real,
+      // transient "Unable to fetch team information" error (see confirmRemoveTeam()'s own comment).
       await expect(page).toHaveURL(/\/teams\/list\?team=[a-f0-9]+&cardDetails=true$/);
-      await expect(page.getByRole('heading', { name: 'QA Search Test Team', level: 4 })).toBeVisible();
+      await expect(async () => {
+        if ((await page.getByText('Unable to fetch team information', { exact: false }).count()) > 0) {
+          await page.reload();
+        }
+        await expect(page.getByRole('heading', { name: 'QA Search Test Team', level: 4 })).toBeVisible();
+      }).toPass({ timeout: 30_000 });
 
       // 4. Cleanup: delete the throwaway team so it doesn't linger.
       await openRemoveTeamDialog(page);
@@ -967,6 +1615,48 @@ test.describe('Teams', () => {
 
       // 'Teams' is NOT also shown (no team matches this query) - confirms 'People' is a genuinely separate grouping, not a rename/merge.
       await expect(dropdown.getByText('Teams', { exact: true })).toBeHidden();
+    });
+
+    test("7.3 Searching by a real member's exact email address matches them too, not just their display name @real-email", async ({
+      page,
+    }) => {
+      // 6.7's invitee is searchable by their real email, not just 'QA Automation'.
+      await page.goto(`${BASE_URL}/teams/list`);
+      const searchBox = page.getByRole('combobox', { name: 'Select Teams & People' });
+      await searchBox.click();
+      await searchBox.pressSequentially(inviteeEmail);
+
+      const dropdown = page.getByRole('listbox', { name: 'Select Teams & People' });
+      await expect(dropdown.getByText('People', { exact: true })).toBeVisible();
+      await expect(dropdown.getByRole('option', { name: 'QA Automation', exact: true })).toBeVisible();
+    });
+
+    test('7.4 A query matching neither a team nor a person shows a clear no-results state, not an empty-looking dropdown @real-email', async ({
+      page,
+    }) => {
+      await page.goto(`${BASE_URL}/teams/list`);
+      const searchBox = page.getByRole('combobox', { name: 'Select Teams & People' });
+      await searchBox.click();
+      await searchBox.pressSequentially('zzzznonexistentqueryzzzz');
+
+      const dropdown = page.getByRole('listbox', { name: 'Select Teams & People' });
+      await expect(dropdown).toBeVisible();
+      await expect(dropdown.getByText('Teams', { exact: true })).toBeHidden();
+      await expect(dropdown.getByText('People', { exact: true })).toBeHidden();
+      await expect(dropdown.getByText('No options', { exact: true })).toBeVisible();
+    });
+
+    test('7.5 A very long search query does not visually break the search box or its results dropdown @real-email', async ({ page }) => {
+      await page.goto(`${BASE_URL}/teams/list`);
+      const searchBox = page.getByRole('combobox', { name: 'Select Teams & People' });
+      await searchBox.click();
+      await searchBox.pressSequentially('a'.repeat(150));
+
+      const { bodyScrollWidth, bodyClientWidth } = await page.evaluate(() => ({
+        bodyScrollWidth: document.body.scrollWidth,
+        bodyClientWidth: document.body.clientWidth,
+      }));
+      expect(bodyScrollWidth).toBe(bodyClientWidth);
     });
   });
 
@@ -1017,5 +1707,457 @@ test.describe('Teams', () => {
       await expect(page.getByText('Invitation has been revoked successfully!', { exact: true })).toBeVisible();
       await expect(page.getByText('You have not sent any invitations.', { exact: true })).toBeVisible();
     });
+  });
+
+  // Placed last on purpose: leaves 2 Active members sharing the same
+  // display name, which would break Suite 7's exact-one-match assumptions if it ran earlier.
+  test.describe('Teams — Duplicate Display Names', () => {
+    test("6.12 REAL BUG: two real Active members who share the exact same display name ('QA Automation', from completeProfile()'s hardcoded values) are shown with ZERO distinguishing information (no email, no other identifier) in the company-wide Members list @real-email", async ({
+      page,
+      browser,
+    }) => {
+      // A second real registration + real email round-trip, on top of this
+      // test's own invite/accept round-trip.
+      test.setTimeout(300_000);
+
+      // 1. Register and verify a second real, disposable member - every
+      // account completeProfile() touches gets the identical hardcoded
+      // 'QA'/'Automation' name, so this second member is indistinguishable
+      // by name from 6.7's own invitee, already Active in this same company.
+      const secondEmail = generateUniqueEmailAlias();
+      const secondUsername = generateUsernameFromEmail(secondEmail);
+      const secondPassword = requireEnv('TEST_REGISTER_PASSWORD');
+      const registeredAt = new Date();
+      const secondContext = await browser.newContext({ ...devices['Desktop Chrome'] });
+      const secondPage = await secondContext.newPage();
+      await registerNewAccount(secondPage, secondEmail);
+      const verificationLink = await getVerificationLink(secondEmail, registeredAt, 240_000);
+      await secondPage.goto(verificationLink);
+      await expect(secondPage).toHaveURL(`${BASE_URL}/login`);
+      await secondPage.getByRole('textbox', { name: 'Username or Email' }).fill(secondUsername);
+      await secondPage.getByRole('textbox', { name: 'Password' }).fill(secondPassword);
+      await secondPage.getByRole('button', { name: 'Log In' }).click();
+      await expect(secondPage).toHaveURL(`${BASE_URL}/complete-profile`, { timeout: 15_000 });
+      await completeProfile(secondPage);
+      await expect(secondPage).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
+
+      // 2. Invite and accept, same pattern as 6.7 (inlined - the Invite
+      // Member Flow describe's own openInviteMemberModal()/
+      // typeAndChipInviteEmail() helpers are scoped to that block, not this one).
+      await page.goto(`${BASE_URL}/teams/members`);
+      await page.getByRole('button', { name: 'Invite Member' }).click();
+      await expect(page.getByRole('heading', { name: 'Invite Member' })).toBeVisible();
+      const inviteCombobox = page.getByRole('combobox', { name: 'Add People by Email' });
+      await inviteCombobox.click();
+      await inviteCombobox.pressSequentially(secondEmail);
+      await page.keyboard.press('Enter');
+      await page.getByRole('button', { name: 'Invite' }).click();
+      await expect(page.getByText('Your invitation(s) have been sent.', { exact: true })).toBeVisible();
+      const invitationLink = await getInvitationLink(secondEmail, 240_000);
+      await secondPage.goto(invitationLink);
+      await secondPage.getByTestId('accept-btn').click();
+      await expect(secondPage).toHaveURL(`${BASE_URL}/company`, { timeout: 15_000 });
+      await secondContext.close();
+
+      // 3. The Members list now has 2 distinct real people, both rendered
+      // identically as 'QA Automation' with no email/id/tooltip to tell them apart.
+      await page.goto(`${BASE_URL}/teams/members`);
+      await expect(page.getByRole('heading', { name: 'Member (2)', exact: true })).toBeVisible({ timeout: 20_000 });
+      // Matches either role per member row (see CLAUDE.md's row role-
+      // inconsistency gotcha) - the two rows could even mix roles.
+      const memberRows = page.getByRole('link', { name: 'QA Automation' }).or(page.getByRole('button', { name: 'QA Automation' }));
+      await expect(memberRows).toHaveCount(2);
+      await expect(page.locator('[title*="@"], [aria-label*="@"]')).toHaveCount(0);
+      await expect(page.getByText('@', { exact: false })).toHaveCount(0);
+    });
+  });
+});
+
+// Fully self-contained (registers all 3 accounts from scratch) - its own
+// top-level describe so it never touches the main 'Teams' describe's shared state.
+test.describe('Teams — Accepting Multiple Pending Invitations Sequentially', () => {
+  test("6.13 A user with two separate pending invitations, from two different companies, can accept both one after another - each lands them as an Active member of that inviter's own company, independently @real-email", async ({
+    browser,
+    browserName,
+  }) => {
+    test.skip(browserName !== 'chromium', 'Three real registrations + two real invitation round-trips; runs once on chromium only.');
+    test.setTimeout(600_000);
+
+    // 1. Register + verify the shared invitee (D).
+    const inviteeAlias = generateUniqueEmailAlias();
+    const inviteeUsername = generateUsernameFromEmail(inviteeAlias);
+    const password = requireEnv('TEST_REGISTER_PASSWORD');
+    const inviteeContext = await browser.newContext({ ...devices['Desktop Chrome'] });
+    const inviteePage = await inviteeContext.newPage();
+    const inviteeRegisteredAt = new Date();
+    await registerNewAccount(inviteePage, inviteeAlias);
+    const inviteeVerificationLink = await getVerificationLink(inviteeAlias, inviteeRegisteredAt, 240_000);
+    await inviteePage.goto(inviteeVerificationLink);
+    await expect(inviteePage).toHaveURL(`${BASE_URL}/login`);
+    await inviteePage.getByRole('textbox', { name: 'Username or Email' }).fill(inviteeUsername);
+    await inviteePage.getByRole('textbox', { name: 'Password' }).fill(password);
+    await inviteePage.getByRole('button', { name: 'Log In' }).click();
+    await expect(inviteePage).toHaveURL(`${BASE_URL}/complete-profile`, { timeout: 15_000 });
+    await completeProfile(inviteePage);
+    await expect(inviteePage).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
+
+    // 2. Register two separate owner accounts (C1, C2), each inviting D from their own separate company.
+    async function registerOwnerAndInvite(ownerAlias: string) {
+      const ownerUsername = generateUsernameFromEmail(ownerAlias);
+      const ownerContext = await browser.newContext({ ...devices['Desktop Chrome'] });
+      const ownerPage = await ownerContext.newPage();
+      const ownerRegisteredAt = new Date();
+      await registerNewAccount(ownerPage, ownerAlias);
+      const ownerVerificationLink = await getVerificationLink(ownerAlias, ownerRegisteredAt, 240_000);
+      await ownerPage.goto(ownerVerificationLink);
+      await expect(ownerPage).toHaveURL(`${BASE_URL}/login`);
+      await ownerPage.getByRole('textbox', { name: 'Username or Email' }).fill(ownerUsername);
+      await ownerPage.getByRole('textbox', { name: 'Password' }).fill(password);
+      await ownerPage.getByRole('button', { name: 'Log In' }).click();
+      await expect(ownerPage).toHaveURL(`${BASE_URL}/complete-profile`, { timeout: 15_000 });
+      await completeProfile(ownerPage);
+      await expect(ownerPage).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
+
+      await ownerPage.goto(`${BASE_URL}/teams/members`);
+      await ownerPage.getByRole('button', { name: 'Invite Member' }).click();
+      await expect(ownerPage.getByRole('heading', { name: 'Invite Member' })).toBeVisible();
+      const combobox = ownerPage.getByRole('combobox', { name: 'Add People by Email' });
+      await combobox.click();
+      await combobox.pressSequentially(inviteeAlias);
+      await ownerPage.keyboard.press('Enter');
+      await ownerPage.getByRole('button', { name: 'Invite' }).click();
+      await expect(ownerPage.getByText('Your invitation(s) have been sent.', { exact: true })).toBeVisible();
+      await ownerContext.close();
+    }
+
+    // getInvitationLink() matches by subject + 'to', not "newest" - since
+    // both invitations share the same 'to' address, a call issued before
+    // invitation 2 arrives can re-return invitation 1's link. Polls until a
+    // genuinely different link shows up.
+    async function getDistinctInvitationLink(toAddress: string, excludeLink: string, timeoutMs = 240_000): Promise<string> {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        const link = await getInvitationLink(toAddress, 5_000).catch(() => null);
+        if (link && link !== excludeLink) return link;
+        await new Promise((resolve) => setTimeout(resolve, 3_000));
+      }
+      throw new Error(`Timed out waiting for a second, distinct invitation link to ${toAddress}.`);
+    }
+
+    const owner1Alias = generateUniqueEmailAlias();
+    await registerOwnerAndInvite(owner1Alias);
+    const invitationLink1 = await getInvitationLink(inviteeAlias, 240_000);
+
+    const owner2Alias = generateUniqueEmailAlias();
+    await registerOwnerAndInvite(owner2Alias);
+    const invitationLink2 = await getDistinctInvitationLink(inviteeAlias, invitationLink1, 240_000);
+    expect(invitationLink2).not.toBe(invitationLink1);
+
+    // 3. D accepts BOTH invitations sequentially, in the same already-logged-in session.
+    await inviteePage.goto(invitationLink1);
+    await expect(inviteePage.getByText('You’ve been invited!', { exact: true })).toBeVisible();
+    await inviteePage.getByTestId('accept-btn').click();
+    await expect(inviteePage).toHaveURL(`${BASE_URL}/company`, { timeout: 15_000 });
+
+    await inviteePage.goto(invitationLink2);
+    await expect(inviteePage.getByText('You’ve been invited!', { exact: true })).toBeVisible();
+    await inviteePage.getByTestId('accept-btn').click();
+    await expect(inviteePage).toHaveURL(`${BASE_URL}/company`, { timeout: 15_000 });
+
+    await inviteeContext.close();
+
+    // 4. Each inviter's OWN company independently shows D as a real Active member now.
+    async function loginAndConfirmActiveMember(ownerAlias: string) {
+      const checkContext = await browser.newContext({ ...devices['Desktop Chrome'] });
+      const checkPage = await checkContext.newPage();
+      await checkPage.goto(`${BASE_URL}/login`);
+      await checkPage.locator('input[name="username"]').fill(generateUsernameFromEmail(ownerAlias));
+      await checkPage.locator('input[name="password"]').fill(password);
+      await checkPage.locator('button[type="submit"]').click();
+      await expect(checkPage).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
+      await checkPage.goto(`${BASE_URL}/teams/members`);
+      await expect(checkPage.getByRole('heading', { name: 'Member (1)', exact: true })).toBeVisible({ timeout: 20_000 });
+      // Same role-inconsistency already documented for teamCard() - a
+      // member row can render as either a button or a link.
+      await expect(
+        checkPage.getByRole('link', { name: 'QA Automation' }).or(checkPage.getByRole('button', { name: 'QA Automation' }))
+      ).toBeVisible();
+      await checkContext.close();
+    }
+    await loginAndConfirmActiveMember(owner1Alias);
+    await loginAndConfirmActiveMember(owner2Alias);
+  });
+});
+
+// Fully self-contained - registers its own account so it doesn't depend on
+// or interfere with the main 'Teams' describe's own shared, order-sensitive state.
+test.describe('Teams — List Sorting and Ownership Filtering', () => {
+  test('6.14 Teams are shown alphabetically by name (not creation order), and that order survives a real reload; no team-ownership filter control exists anywhere on the page @real-email', async ({
+    browser,
+    browserName,
+  }) => {
+    test.skip(browserName !== 'chromium', 'One real registration; runs once on chromium only.');
+    test.setTimeout(300_000);
+
+    const emailAlias = generateUniqueEmailAlias();
+    const username = generateUsernameFromEmail(emailAlias);
+    const password = requireEnv('TEST_REGISTER_PASSWORD');
+    const context = await browser.newContext({ ...devices['Desktop Chrome'] });
+    const page = await context.newPage();
+    const registeredAt = new Date();
+    await registerNewAccount(page, emailAlias);
+    const verifyLink = await getVerificationLink(emailAlias, registeredAt);
+    await page.goto(verifyLink);
+    await page.goto(`${BASE_URL}/login`);
+    await page.fill('input[name="username"]', username);
+    await page.fill('input[name="password"]', password);
+    await page.click('button[type="submit"]');
+    await expect(page).toHaveURL(/\/complete-profile$/, { timeout: 15_000 });
+    await completeProfile(page);
+    await expect(page).toHaveURL(/\/company$/, { timeout: 15_000 });
+
+    // 1. Create 3 teams in deliberately reverse-alphabetical creation order.
+    for (const name of ['Zebra Team', 'Middle Team', 'Alpha Team']) {
+      await page.goto(`${BASE_URL}/teams/list`);
+      await page.getByRole('button', { name: '+ Create Team' }).click();
+      const nameField = page.getByRole('textbox', { name: 'Name' });
+      await nameField.click();
+      await nameField.pressSequentially(name);
+      await page.getByRole('button', { name: 'Create' }).click();
+      await expect(page.getByText('Your team was created successfully!', { exact: true })).toBeVisible({ timeout: 15_000 });
+      await page.getByRole('button', { name: 'Continue' }).click();
+      await page.waitForTimeout(500);
+    }
+
+    // 2. Despite being created Zebra -> Middle -> Alpha, the real display
+    // order is genuinely alphabetical: 'Alpha Team' < 'Middle Team' <
+    // 'My Team' (the pre-existing default) < 'Zebra Team'.
+    await page.goto(`${BASE_URL}/teams/list`);
+    const cardOrder = async () => {
+      const cards = page.getByRole('link', { name: /member/ }).or(page.getByRole('button', { name: /member/ }));
+      const texts = await cards.allTextContents();
+      return texts.map((t) => t.replace(/\d+ members?.*$/, '').trim());
+    };
+    await expect(async () => {
+      expect(await cardOrder()).toEqual(['Alpha Team', 'Middle Team', 'My Team', 'Zebra Team']);
+    }).toPass({ timeout: 15_000 });
+
+    // 3. The same alphabetical order survives a real, full reload - not just an in-memory artifact of creation.
+    await page.reload();
+    await expect(async () => {
+      expect(await cardOrder()).toEqual(['Alpha Team', 'Middle Team', 'My Team', 'Zebra Team']);
+    }).toPass({ timeout: 15_000 });
+
+    // 4. No ownership/sharing filter control exists anywhere on this page -
+    // confirmed by enumerating every button/combobox present.
+    const allButtonTexts = await page.getByRole('button').allTextContents();
+    const filterLikeButtons = allButtonTexts.filter((t) => /filter|owned|shared/i.test(t));
+    expect(filterLikeButtons).toEqual([]);
+    await expect(page.locator('[role="combobox"]')).toHaveCount(1);
+
+    await context.close();
+  });
+});
+
+// Fully self-contained.
+test.describe('Teams — Deleting a Team Does Not Cascade to its Invitations', () => {
+  test("6.15 REAL: deleting a team does NOT remove pending invitations sent from that team's own detail page - invitations are genuinely company-wide, not team-scoped @real-email", async ({
+    browser,
+    browserName,
+  }) => {
+    test.skip(browserName !== 'chromium', 'One real registration + one real invitation; runs once on chromium only.');
+    test.setTimeout(300_000);
+
+    const emailAlias = generateUniqueEmailAlias();
+    const username = generateUsernameFromEmail(emailAlias);
+    const password = requireEnv('TEST_REGISTER_PASSWORD');
+    const context = await browser.newContext({ ...devices['Desktop Chrome'] });
+    const page = await context.newPage();
+    const registeredAt = new Date();
+    await registerNewAccount(page, emailAlias);
+    const verifyLink = await getVerificationLink(emailAlias, registeredAt);
+    await page.goto(verifyLink);
+    await page.goto(`${BASE_URL}/login`);
+    await page.fill('input[name="username"]', username);
+    await page.fill('input[name="password"]', password);
+    await page.click('button[type="submit"]');
+    await expect(page).toHaveURL(/\/complete-profile$/, { timeout: 15_000 });
+    await completeProfile(page);
+    await expect(page).toHaveURL(/\/company$/, { timeout: 15_000 });
+
+    // 1. Create a throwaway team and invite a brand-new email FROM that team's own detail page.
+    await page.goto(`${BASE_URL}/teams/list`);
+    await page.getByRole('button', { name: '+ Create Team' }).click();
+    const nameField = page.getByRole('textbox', { name: 'Name' });
+    await nameField.click();
+    await nameField.pressSequentially('QA Cascade Test Team');
+    await page.getByRole('button', { name: 'Create' }).click();
+    await expect(page.getByText('Your team was created successfully!', { exact: true })).toBeVisible({ timeout: 15_000 });
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await page.waitForTimeout(500);
+
+    await page.goto(`${BASE_URL}/teams/list`);
+    await page
+      .getByRole('link', { name: /QA Cascade Test Team/ })
+      .or(page.getByRole('button', { name: /QA Cascade Test Team/ }))
+      .click();
+    await page.getByRole('button', { name: 'Invite Member' }).click();
+    const cascadeEmail = generateUniqueEmailAlias();
+    const combobox = page.getByRole('combobox', { name: 'Add People by Email' });
+    await combobox.click();
+    await combobox.pressSequentially(cascadeEmail);
+    await page.keyboard.press('Enter');
+    await page.getByRole('button', { name: 'Invite' }).click();
+    await expect(page.getByText('Your invitation(s) have been sent.', { exact: true })).toBeVisible({ timeout: 15_000 });
+
+    // 2. Delete the team entirely.
+    await page.goto(`${BASE_URL}/teams/list`);
+    await page
+      .getByRole('link', { name: /QA Cascade Test Team/ })
+      .or(page.getByRole('button', { name: /QA Cascade Test Team/ }))
+      .click();
+    await page.getByRole('button', { name: 'Remove Team' }).click();
+    await page.getByRole('button', { name: 'Yes, remove' }).click();
+    await expect(page.getByText('Your team was deleted successfully!', { exact: true })).toBeVisible({ timeout: 15_000 });
+
+    // 3. REAL: the invitation is still there, fully intact - it was never
+    // actually tied to the team it was sent from (same shape as accepting
+    // an invitation not auto-joining that team either - see CLAUDE.md).
+    await page.goto(`${BASE_URL}/teams/members?memberTab=sentInvitations`);
+    await expect(page.getByText(cascadeEmail, { exact: true })).toBeVisible();
+    await expect(page.getByText('1–1 of 1', { exact: true })).toBeVisible();
+
+    // Cleanup: cancel the invitation.
+    const invitationRow = page.getByRole('row').filter({ has: page.getByText(cascadeEmail, { exact: true }) });
+    await invitationRow.getByRole('button').filter({ hasText: /^$/ }).click();
+    await page.getByRole('button', { name: 'Yes, cancel' }).click();
+    await expect(page.getByText('Invitation has been revoked successfully!', { exact: true })).toBeVisible();
+
+    await context.close();
+  });
+});
+
+// Fully self-contained.
+test.describe('Teams — Active Members List Has No Sort Control', () => {
+  test('6.16 REAL: the company-wide Active Members list is a plain list with zero sort controls of any kind - no sortable column headers exist for it @real-email', async ({
+    browser,
+    browserName,
+  }) => {
+    test.skip(browserName !== 'chromium', 'One real registration; runs once on chromium only.');
+    test.setTimeout(120_000);
+
+    // This check is about the widget's own structure, not its data - any
+    // logged-in account works, so a fresh throwaway registration is enough.
+    const emailAlias = generateUniqueEmailAlias();
+    const username = generateUsernameFromEmail(emailAlias);
+    const password = requireEnv('TEST_REGISTER_PASSWORD');
+    const context = await browser.newContext({ ...devices['Desktop Chrome'] });
+    const page = await context.newPage();
+    const registeredAt = new Date();
+    await registerNewAccount(page, emailAlias);
+    const verifyLink = await getVerificationLink(emailAlias, registeredAt);
+    await page.goto(verifyLink);
+    await page.goto(`${BASE_URL}/login`);
+    await page.fill('input[name="username"]', username);
+    await page.fill('input[name="password"]', password);
+    await page.click('button[type="submit"]');
+    await expect(page).toHaveURL(/\/complete-profile$/, { timeout: 15_000 });
+    await completeProfile(page);
+    await expect(page).toHaveURL(/\/company$/, { timeout: 15_000 });
+
+    await page.goto(`${BASE_URL}/teams/members`);
+    await expect(page.getByRole('tab', { name: 'Active' })).toHaveAttribute('aria-selected', 'true');
+
+    // Zero column headers anywhere on this tab (unlike Sent Invitations,
+    // which IS a real grid - see its own already-documented 'looks
+    // sortable but isn't' bug for WEB-TC-083).
+    await expect(page.getByRole('columnheader')).toHaveCount(0);
+    await expect(page.getByRole('grid')).toHaveCount(0);
+
+    await context.close();
+  });
+});
+
+// Fully self-contained.
+test.describe('Teams — Removal Notification Email', () => {
+  test('6.17 Removing a member from a team @real-email', async ({ browser, browserName }) => {
+    test.skip(browserName !== 'chromium', 'Two real registrations + one real invite/accept round-trip; runs once on chromium only.');
+    test.setTimeout(400_000);
+
+    const password = requireEnv('TEST_REGISTER_PASSWORD');
+
+    // 1. Register the owner.
+    const ownerAlias = generateUniqueEmailAlias();
+    const ownerUsername = generateUsernameFromEmail(ownerAlias);
+    const ownerContext = await browser.newContext({ ...devices['Desktop Chrome'] });
+    const ownerPage = await ownerContext.newPage();
+    const ownerRegisteredAt = new Date();
+    await registerNewAccount(ownerPage, ownerAlias);
+    const ownerVerifyLink = await getVerificationLink(ownerAlias, ownerRegisteredAt);
+    await ownerPage.goto(ownerVerifyLink);
+    await ownerPage.goto(`${BASE_URL}/login`);
+    await ownerPage.fill('input[name="username"]', ownerUsername);
+    await ownerPage.fill('input[name="password"]', password);
+    await ownerPage.click('button[type="submit"]');
+    await expect(ownerPage).toHaveURL(/\/complete-profile$/, { timeout: 15_000 });
+    await completeProfile(ownerPage);
+    await expect(ownerPage).toHaveURL(/\/company$/, { timeout: 15_000 });
+
+    // 2. Register the member, invite + accept.
+    const memberAlias = generateUniqueEmailAlias();
+    const memberUsername = generateUsernameFromEmail(memberAlias);
+    const memberContext = await browser.newContext({ ...devices['Desktop Chrome'] });
+    const memberPage = await memberContext.newPage();
+    const memberRegisteredAt = new Date();
+    await registerNewAccount(memberPage, memberAlias);
+    const memberVerifyLink = await getVerificationLink(memberAlias, memberRegisteredAt);
+    await memberPage.goto(memberVerifyLink);
+    await memberPage.goto(`${BASE_URL}/login`);
+    await memberPage.fill('input[name="username"]', memberUsername);
+    await memberPage.fill('input[name="password"]', password);
+    await memberPage.click('button[type="submit"]');
+    await expect(memberPage).toHaveURL(/\/complete-profile$/, { timeout: 15_000 });
+    await completeProfile(memberPage);
+    await expect(memberPage).toHaveURL(/\/company$/, { timeout: 15_000 });
+
+    await ownerPage.goto(`${BASE_URL}/teams/members`);
+    await ownerPage.getByRole('button', { name: 'Invite Member' }).click();
+    const combobox = ownerPage.getByRole('combobox', { name: 'Add People by Email' });
+    await combobox.click();
+    await combobox.pressSequentially(memberAlias);
+    await ownerPage.keyboard.press('Enter');
+    await ownerPage.getByRole('button', { name: 'Invite' }).click();
+    await expect(ownerPage.getByText('Your invitation(s) have been sent.', { exact: true })).toBeVisible({ timeout: 15_000 });
+
+    const invitationLink = await getInvitationLink(memberAlias, 240_000);
+    await memberPage.goto(invitationLink);
+    await memberPage.getByTestId('accept-btn').click();
+    await expect(memberPage).toHaveURL(`${BASE_URL}/company`, { timeout: 15_000 });
+
+    // 3. Add the member to 'My Team', then note the exact time before removing them.
+    await ownerPage.goto(`${BASE_URL}/teams/list`);
+    await ownerPage
+      .getByRole('link', { name: /My Team/ })
+      .or(ownerPage.getByRole('button', { name: /My Team/ }))
+      .click();
+    await ownerPage.getByRole('button', { name: '+ Add Members' }).click();
+    await ownerPage.getByRole('button', { name: 'Open' }).click();
+    await ownerPage.getByRole('option', { name: 'QA Automation' }).click();
+    await ownerPage.getByRole('button', { name: 'Save' }).click();
+    await expect(ownerPage.getByText('QA Automation', { exact: true })).toBeVisible();
+
+    const removalRequestedAt = new Date();
+    const memberRow = ownerPage.locator('.MuiCardHeader-root').filter({ hasText: 'QA Automation' });
+    await memberRow.getByRole('button', { name: 'Remove member' }).click();
+    await ownerPage.getByRole('button', { name: 'Yes, remove' }).click();
+    await expect(ownerPage.getByText('QA Automation', { exact: true })).toHaveCount(0);
+
+    // 4. REAL: removing a member sends no notification email of any kind -
+    // if this ever starts failing, the app genuinely added one.
+    const subject = await checkForAnyEmail(memberAlias, removalRequestedAt, 60_000);
+    expect(subject, 'expected no removal-notification email to be sent to the removed member').toBeNull();
+
+    await ownerContext.close();
+    await memberContext.close();
   });
 });

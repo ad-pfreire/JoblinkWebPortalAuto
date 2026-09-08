@@ -51,6 +51,42 @@ test.describe('Account Registration', () => {
     const emailAlias = generateUniqueEmailAlias();
     await registerNewAccount(page, emailAlias);
   });
+
+  test('should treat email and username as case-insensitive during sign-up', async ({ page }) => {
+    // 1. Register with an UPPERCASE email/username - accepted the same as lowercase.
+    const emailAlias = generateUniqueEmailAlias();
+    const upperEmail = emailAlias.toUpperCase();
+    const upperUsername = generateUsernameFromEmail(emailAlias).toUpperCase();
+    const password = requireEnv('TEST_REGISTER_PASSWORD');
+
+    await page.goto(`${BASE_URL}/register`);
+    await page.fill('input[name="email"]', upperEmail);
+    await page.fill('input[name="username"]', upperUsername);
+    await page.fill('input[name="password"]', password);
+    await page.fill('input[name="confirmPassword"]', password);
+    await page.check('input[name="acceptTerms"]');
+    await expect(page.locator('button[type="submit"]')).toBeEnabled();
+    await page.click('button[type="submit"]');
+    await expect(page).toHaveURL(/.*\/email-verification$/, { timeout: 15_000 });
+
+    // 2. Registering again with the exact SAME email/username, but back in
+    // lowercase, is rejected as a duplicate - proving the backend treats
+    // case only as a display difference, not a distinct identity. The
+    // message here is "User already exists" (not "Email already exists" -
+    // that's a different message, shown when only the email collides; see
+    // the existing "already-registered email" test above, which collides
+    // on email alone and gets that other message).
+    await page.goto(`${BASE_URL}/register`);
+    await page.fill('input[name="email"]', emailAlias);
+    await page.fill('input[name="username"]', generateUsernameFromEmail(emailAlias));
+    await page.fill('input[name="password"]', password);
+    await page.fill('input[name="confirmPassword"]', password);
+    await page.check('input[name="acceptTerms"]');
+    await expect(page.locator('button[type="submit"]')).toBeEnabled();
+    await page.click('button[type="submit"]');
+    await expect(page.locator('text=User already exists')).toBeVisible();
+    await expect(page).toHaveURL(`${BASE_URL}/register`);
+  });
 });
 
 // The only test here reading a real email over IMAP - kept in its own
@@ -207,5 +243,27 @@ test.describe('Account Registration - server responses', () => {
     // "no longer valid" message instead of a success one.
     await expect(page).toHaveURL(`${BASE_URL}/login`);
     await expect(page.locator('text=The code is no longer valid.')).toBeVisible();
+  });
+
+  test('should block login with the correct credentials while the account is still unverified', async ({ page }) => {
+    // 1. Register a new, run-unique account and stop at the
+    // pending-verification screen - never follows the real email link.
+    const emailAlias = generateUniqueEmailAlias();
+    const username = generateUsernameFromEmail(emailAlias);
+    const password = requireEnv('TEST_REGISTER_PASSWORD');
+    await registerNewAccount(page, emailAlias);
+
+    // 2. Attempt to log in anyway with the exact correct credentials.
+    await page.goto(`${BASE_URL}/login`);
+    await page.fill('input[name="username"]', username);
+    await page.fill('input[name="password"]', password);
+    await page.click('button[type="submit"]');
+
+    // Blocked - stays on /login with a specific error and a 'Resend'
+    // affordance, not silently let through. Asserted by text, not a bare
+    // getByRole('alert') - that also matches Next.js's own route-announcer
+    // alert (see CLAUDE.md).
+    await expect(page).toHaveURL(`${BASE_URL}/login`);
+    await expect(page.getByText('You need to confirm your email', { exact: false })).toBeVisible();
   });
 });

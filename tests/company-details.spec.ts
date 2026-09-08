@@ -412,6 +412,54 @@ test.describe('Company Details', () => {
       await expect(page.getByRole('textbox', { name: 'Company Website' })).toHaveValue('https://example.com');
     });
 
+    test('3.4b REAL BUG: Zip Code has no format validation at all, client-side OR server-side - a non-numeric value genuinely persists to the backend', async ({
+      page,
+    }) => {
+      await page.goto(`${BASE_URL}/company?edit=true`);
+      const zip = page.getByRole('textbox', { name: 'Zip Code' });
+      const contractorLicense = page.getByRole('textbox', { name: 'Contractor License' });
+      const saveButton = page.getByRole('button', { name: 'Save' });
+
+      // 1. Type an obviously invalid, non-numeric value into 'Zip Code' and blur it.
+      await zip.click();
+      await zip.fill('ABCDE');
+      await contractorLicense.click();
+
+      // NO inline error appears and Save stays ENABLED - same absence of
+      // client-side validation as Company Website (3.4).
+      await expect(zip).not.toHaveAttribute('aria-invalid', 'true');
+      await expect(saveButton).toBeEnabled();
+
+      // 2. Save - unlike Company Website, this ISN'T silently rejected
+      // server-side: the invalid value genuinely round-trips and persists.
+      const saveResponsePromise = page.waitForResponse(
+        (response) => response.url().includes('/company?edit=true') && response.request().method() === 'POST'
+      );
+      await saveButton.click();
+      const saveResponse = await saveResponsePromise;
+      expect(saveResponse.status()).toBe(200);
+      await expect(page).toHaveURL(`${BASE_URL}/company`);
+
+      // 3. Reload the edit form - the garbage value is still there, proving
+      // it was genuinely saved, not just held client-side.
+      await page.goto(`${BASE_URL}/company?edit=true`);
+      await expect(zip).toHaveValue('ABCDE');
+
+      // Cleanup: restore the real numeric Zip Code the rest of this file depends on.
+      await zip.click();
+      await zip.fill('93458');
+      await contractorLicense.click();
+      await expect(saveButton).toBeEnabled();
+      const restoreResponsePromise = page.waitForResponse(
+        (response) => response.url().includes('/company?edit=true') && response.request().method() === 'POST'
+      );
+      await saveButton.click();
+      await restoreResponsePromise;
+      await expect(page).toHaveURL(`${BASE_URL}/company`);
+      await page.goto(`${BASE_URL}/company?edit=true`);
+      await expect(zip).toHaveValue('93458');
+    });
+
     test('3.5 No maximum length is enforced on Company Name, at least up to 251 characters', async ({ page }) => {
       await page.goto(`${BASE_URL}/company?edit=true`);
       const companyName = page.getByRole('textbox', { name: 'Company Name' });
@@ -428,6 +476,14 @@ test.describe('Company Details', () => {
       expect(await companyName.inputValue()).toHaveLength(251);
       await expect(companyName).not.toHaveAttribute('aria-invalid', 'true');
       await expect(page.getByText('The field is required', { exact: true })).toHaveCount(0);
+
+      // No page-level layout break from this - same scrollWidth/clientWidth
+      // check already established for Payments' own long-Address-line test.
+      const { bodyScrollWidth, bodyClientWidth } = await page.evaluate(() => ({
+        bodyScrollWidth: document.body.scrollWidth,
+        bodyClientWidth: document.body.clientWidth,
+      }));
+      expect(bodyScrollWidth).toBe(bodyClientWidth);
 
       // Cleanup: reload without saving - not persisted, to protect the shared account.
       await page.goto(`${BASE_URL}/company?edit=true`);
@@ -481,6 +537,38 @@ test.describe('Company Details', () => {
       await expect(companyDetailsCard(page).getByRole('heading', { name: 'QA Automation Test Co', exact: true })).toBeVisible();
       await expect(companyDetailsCard(page).getByRole('heading', { name: 'qa-company-test@crifa.com' })).toBeVisible();
       await expect(companyDetailsCard(page).getByRole('heading', { name: 'LIC-123456' })).toBeVisible();
+    });
+
+    test('4.1b A refresh on a second, already-open tab shows the genuinely fresh value from the backend, not a stale one held over from before the change', async ({
+      page,
+      browser,
+    }) => {
+      // 1. Open a SECOND, independent session (its own login, own cookies)
+      // and load /company there first, capturing its own view of the
+      // current Company Name before any change happens.
+      const secondContext = await browser.newContext();
+      const secondPage = await secondContext.newPage();
+      await loginAsSeedAndGoToCompany(secondPage);
+      const originalName = await companyDetailsCard(secondPage).getByRole('heading', { level: 6 }).first().textContent();
+
+      // 2. In the FIRST session, change and save a new Company Name.
+      await page.goto(`${BASE_URL}/company?edit=true`);
+      const companyName = page.getByRole('textbox', { name: 'Company Name' });
+      await companyName.fill('QA Automation Test Co FRESH-CHECK');
+      await saveCompanyDetailsAndWaitForNavigation(page);
+      await expect(companyDetailsCard(page).getByRole('heading', { name: 'QA Automation Test Co FRESH-CHECK' })).toBeVisible();
+
+      // 3. Refresh the SECOND session's already-open page (no re-login) -
+      // shows the genuinely new value, not the one it had cached from step 1.
+      await secondPage.reload();
+      await expect(companyDetailsCard(secondPage).getByRole('heading', { name: 'QA Automation Test Co FRESH-CHECK' })).toBeVisible();
+      await secondContext.close();
+
+      // Cleanup: restore the baseline name the rest of this file depends on.
+      await page.goto(`${BASE_URL}/company?edit=true`);
+      await companyName.fill(originalName || 'QA Automation Test Co');
+      await saveCompanyDetailsAndWaitForNavigation(page);
+      await expect(companyDetailsCard(page).getByRole('heading', { name: originalName || 'QA Automation Test Co' })).toBeVisible();
     });
 
     test("4.2 The read-only card's 'Phone Number' maps specifically to Mobile Phone Number, not Office Phone Number", async ({ page }) => {
@@ -649,6 +737,148 @@ test.describe('Company Details', () => {
       // Confirmed again by re-entering the edit form.
       await page.goto(`${BASE_URL}/company?edit=true`);
       await expect(page.getByRole('textbox', { name: 'Company Name' })).toHaveValue(originalCompanyName!);
+    });
+  });
+
+  test.describe('Company Details — Footer, Network Loss, and Server Errors', () => {
+    test("6.1 The page footer's Contact Us / Terms & Conditions / Privacy Policy links have the correct real URLs, and the app version shows", async ({
+      page,
+    }) => {
+      // 1. 'Contact Us' is a plain heading, not a link - only the other two are real anchors.
+      await expect(page.getByRole('heading', { name: 'Contact Us', exact: true })).toBeVisible();
+
+      // 2. Terms & Conditions and Privacy Policy point to the real, external Fieldpiece URLs.
+      const termsLink = page.getByRole('link', { name: 'Terms & Conditions' });
+      await expect(termsLink).toBeVisible();
+      await expect(termsLink).toHaveAttribute('href', 'https://www.fieldpiece.com/software-terms-of-service/');
+
+      const privacyLink = page.getByRole('link', { name: 'Privacy Policy' });
+      await expect(privacyLink).toBeVisible();
+      await expect(privacyLink).toHaveAttribute('href', 'https://fieldpiece.com/privacy-policy');
+
+      // 3. A real app version string is shown - not asserting an exact
+      // value since it changes across releases, just that it's a genuine
+      // 'vX.Y.Z' string, not blank or a placeholder.
+      await expect(page.getByText(/^v\d+\.\d+\.\d+$/)).toBeVisible();
+    });
+
+    test('6.2 REAL BUG: a genuine network loss while saving crashes the whole page with an unhandled client-side exception, instead of a retryable inline error', async ({
+      page,
+    }) => {
+      // 1. Dirty the form, then simulate the save request itself failing at
+      // the network level (not a server error - the request never completes at all).
+      await page.goto(`${BASE_URL}/company?edit=true`);
+      const companyName = page.getByRole('textbox', { name: 'Company Name' });
+      const originalValue = await companyName.inputValue();
+      await companyName.click();
+      await companyName.fill('QA Network Loss Test');
+
+      await page.route('**/company?edit=true', (route) => {
+        if (route.request().method() === 'POST') return route.abort('failed');
+        return route.fallback();
+      });
+      await page.getByRole('button', { name: 'Save' }).click();
+      await page.waitForTimeout(1_500);
+
+      // 2. REAL BUG, live-verified 2026-09-08: the app does NOT show a
+      // retryable inline error and does NOT stay on the editable form - it
+      // crashes entirely with Next.js's own unhandled 'Application error'
+      // screen, losing the in-progress edit and leaving the user with no
+      // way to retry short of a full reload.
+      await expect(page.getByRole('heading', { name: /Application error/i })).toBeVisible();
+      await expect(companyName).toHaveCount(0);
+
+      // 3. Cleanup: a fresh reload (not interacting with the crashed page)
+      // recovers cleanly, and confirms nothing was actually saved - the
+      // request never completed, so the original value is intact.
+      await page.unroute('**/company?edit=true');
+      await page.goto(`${BASE_URL}/company?edit=true`);
+      await expect(companyName).toHaveValue(originalValue);
+    });
+
+    test('6.3 REAL BUG: a forced HTTP 500 from the save endpoint ALSO crashes the whole page with the same unhandled client-side exception as 6.2, not a user-friendly error', async ({
+      page,
+    }) => {
+      // 1. Dirty the form, then force the real save response to be a 500.
+      await page.goto(`${BASE_URL}/company?edit=true`);
+      const companyName = page.getByRole('textbox', { name: 'Company Name' });
+      const originalValue = await companyName.inputValue();
+      await companyName.click();
+      await companyName.fill('QA Forced 500 Test');
+
+      await page.route('**/company?edit=true', (route) => {
+        if (route.request().method() === 'POST') {
+          return route.fulfill({ status: 500, contentType: 'text/plain', body: 'Internal Server Error' });
+        }
+        return route.fallback();
+      });
+      await page.getByRole('button', { name: 'Save' }).click();
+      await page.waitForTimeout(1_500);
+
+      // 2. REAL BUG, live-verified 2026-09-08: same crash as 6.2's network-
+      // loss case - a genuine server-side 500 on this endpoint is not
+      // handled with a friendly message either, it's the identical
+      // unhandled Next.js 'Application error' screen.
+      await expect(page.getByRole('heading', { name: /Application error/i })).toBeVisible();
+      await expect(companyName).toHaveCount(0);
+
+      // 3. Cleanup: a fresh reload recovers cleanly and confirms nothing was actually saved.
+      await page.unroute('**/company?edit=true');
+      await page.goto(`${BASE_URL}/company?edit=true`);
+      await expect(companyName).toHaveValue(originalValue);
+    });
+  });
+
+  test.describe('Company Details — Performance and Network Conditions', () => {
+    test('7.1 /company loads comfortably fast on a normal connection', async ({ page }) => {
+      // Not asserting a strict ~2s ceiling literally - this project's own
+      // documented real-infra timing variance (CLAUDE.md) makes that too
+      // flaky to assert as a hard number, but a generous 8s ceiling still
+      // catches a genuinely broken/hanging page load.
+      const start = Date.now();
+      await page.goto(`${BASE_URL}/company`, { waitUntil: 'load' });
+      await expect(page.getByRole('link', { name: 'Edit' })).toBeVisible();
+      const elapsedMs = Date.now() - start;
+      expect(elapsedMs).toBeLessThan(8_000);
+    });
+
+    test('7.2 On a genuinely throttled slow connection, /company still eventually loads correctly, with a loading indicator visible in the meantime', async ({
+      page,
+    }) => {
+      // Uses a real CDP session to throttle network conditions - not a
+      // simulation, the actual page load genuinely goes over a slow link.
+      const client = await page.context().newCDPSession(page);
+      await client.send('Network.enable');
+      await client.send('Network.emulateNetworkConditions', {
+        offline: false,
+        downloadThroughput: (50 * 1024) / 8, // 50 kbps
+        uploadThroughput: (20 * 1024) / 8,
+        latency: 400,
+      });
+
+      const navigationPromise = page.goto(`${BASE_URL}/company`, { waitUntil: 'load', timeout: 60_000 });
+
+      // A loading indicator (a real MUI progressbar, already seen
+      // elsewhere in this app - see the Payments summary card's own
+      // loading state) is visible while the throttled load is still in flight.
+      const progressbar = page.getByRole('progressbar');
+      const sawLoadingIndicator = await progressbar
+        .first()
+        .waitFor({ state: 'visible', timeout: 5_000 })
+        .then(() => true)
+        .catch(() => false);
+
+      await navigationPromise;
+      await expect(page.getByRole('link', { name: 'Edit' })).toBeVisible({ timeout: 10_000 });
+      expect(sawLoadingIndicator).toBe(true);
+
+      // Cleanup: restore normal network conditions for any later test.
+      await client.send('Network.emulateNetworkConditions', {
+        offline: false,
+        downloadThroughput: -1,
+        uploadThroughput: -1,
+        latency: 0,
+      });
     });
   });
 });

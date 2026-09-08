@@ -5,7 +5,13 @@ import { test, expect, Page, devices } from '@playwright/test';
 import { requireEnv } from './utils/env';
 import { getVerificationLink } from './utils/email';
 import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from './utils/account';
-import { stripeFindCustomerByEmail, stripeFindSubscription } from './utils/stripe';
+import {
+  stripeFindCustomerByEmail,
+  stripeFindSubscription,
+  stripeFindActiveSubscription,
+  stripeRequest,
+  stripeAttachClockAndAdvanceTo,
+} from './utils/stripe';
 
 const BASE_URL = requireEnv('BASE_URL');
 
@@ -464,6 +470,14 @@ test.describe('Subscription', () => {
       // Payment History table at the bottom of /company.
       await expect(page.getByText('Paid', { exact: true }).first()).toBeVisible();
       await expect(page.getByText(/1 × Job Link Pro \(at \$12\.00 \/ month\)/).first()).toBeVisible();
+
+      // 4. Converting the trial to a real paid subscription (test 4.2)
+      // didn't touch this account's team/member data - the default team
+      // created at registration is still exactly as it was. On /teams
+      // (For You), the team card is a real link, not a button like its
+      // /teams/list counterpart - live-verified via a failing run's own DOM snapshot.
+      await page.goto(`${BASE_URL}/teams`);
+      await expect(page.getByRole('link', { name: 'My Team 1 member QA' })).toBeVisible();
     });
   });
 
@@ -872,5 +886,163 @@ test.describe('Subscription', () => {
       // via getPlanCardState()'s own extracted .text.
       await expect(page.getByText('Currently Subscribed!', { exact: true })).toBeVisible();
     });
+
+    test('8.4 Reloading immediately after clicking Confirm and Pay does not leave the subscription in an inconsistent state or create a duplicate Payment History entry @real-email', async ({
+      page,
+    }) => {
+      test.slow();
+      // 1. Open the 'Update Subscription' dialog for a real change (Pro +
+      // Invoicing -> Pro, from 8.2's own end state), click 'Confirm and
+      // Pay', and reload without awaiting the click's own completion - a
+      // real Promise.all([click(), reload()]) hangs here instead (the
+      // reload invalidates the click's execution context mid-action,
+      // unlike 8.2's click-vs-click race on the same stable page), so the
+      // click is fired-and-forgotten instead.
+      await page.goto(`${BASE_URL}/subscription`);
+      await selectPlanAndContinue(page, 'Job Link Pro');
+      const confirmButton = page.getByRole('button', { name: 'Confirm and Pay' });
+      await expect(confirmButton).toBeVisible();
+      confirmButton.click().catch(() => {});
+      await page.reload();
+
+      // 2. Whichever way the race resolved, the account settles into ONE
+      // definite, self-consistent plan - never a stuck loading state, and
+      // never both the old and new plan simultaneously claimed.
+      await expect(async () => {
+        await page.goto(`${BASE_URL}/subscription`);
+        const bannerText = await page.getByText(/^You are currently subscribed to the Job Link/).textContent();
+        expect(bannerText).toBeTruthy();
+      }).toPass({ timeout: 30_000 });
+      const proSelected = (await getPlanCardState(page, 'Job Link Pro')).selected;
+      const proInvoicingSelected = (await getPlanCardState(page, 'Job Link Pro + Invoicing')).selected;
+      // Exactly one plan is ever marked selected/current - not zero, not both.
+      expect([proSelected, proInvoicingSelected].filter(Boolean)).toHaveLength(1);
+
+      // 3. No duplicate Payment History row resulted from the race, the
+      // same check already established for 8.2's rapid double-click.
+      await page.goto(`${BASE_URL}/company`);
+      const grid = page.getByRole('grid');
+      await expect(grid.getByRole('row').nth(1)).toBeVisible();
+      const titles = await grid.getByRole('row').allTextContents();
+      const duplicateCount = titles.filter((t, i) => titles.indexOf(t) !== i).length;
+      expect(duplicateCount).toBe(0);
+    });
+  });
+
+  test.describe('Subscription — Pricing Currency', () => {
+    test('9.1 There is no locale/currency switching anywhere on the plan comparison - pricing is hardcoded in USD @real-email', async ({
+      page,
+    }) => {
+      // Live-verified 2026-09-08: this page has no locale/currency selector
+      // of any kind - no dropdown, no language/region picker, nothing.
+      await page.goto(`${BASE_URL}/subscription`);
+      await expect(page.getByText('As low as $12.00 / month', { exact: true })).toBeVisible();
+      await expect(page.getByText('As low as $29.00 / month', { exact: true })).toBeVisible();
+
+      // No combobox/select/link anywhere on the page whose accessible name
+      // suggests a currency or region/locale picker.
+      await expect(page.getByRole('combobox', { name: /currency|locale|region|language/i })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: /currency|locale|region|language/i })).toHaveCount(0);
+
+      // The price text itself is always plain '$', never any other symbol
+      // (€, £, etc.) or a 3-letter currency code - confirms USD is the only option, not just the default.
+      const priceTexts = await page.getByText(/As low as \$/).allTextContents();
+      expect(priceTexts.length).toBeGreaterThan(0);
+      for (const text of priceTexts) {
+        expect(text).toMatch(/^As low as \$\d+\.\d{2} \/ (month|year)$/);
+      }
+    });
+  });
+});
+
+// WEB-TC-116: self-contained (own account, own purchase). Advances a real
+// Test Clock past the period end with NO cancellation scheduled - unlike
+// every other Test Clock use in this project, which forces a lapse.
+test.describe('Subscription — Auto-Renewal', () => {
+  test('10.1 REAL: advancing a real Test Clock past current_period_end with no cancellation scheduled genuinely renews the subscription - new period, new paid invoice, new billing date in the UI @real-email', async ({
+    browser,
+    browserName,
+  }) => {
+    test.skip(browserName !== 'chromium', 'One real registration + purchase + Test Clock advance; runs once on chromium.');
+    test.setTimeout(400_000);
+
+    const password = requireEnv('TEST_REGISTER_PASSWORD');
+    const context = await browser.newContext({ ...devices['Desktop Chrome'] });
+    const page = await context.newPage();
+    const emailAlias = generateUniqueEmailAlias();
+    const username = generateUsernameFromEmail(emailAlias);
+    const registeredAt = new Date();
+
+    await registerNewAccount(page, emailAlias);
+    const verificationLink = await getVerificationLink(emailAlias, registeredAt, 900_000);
+    await page.goto(verificationLink);
+    await expect(page).toHaveURL(`${BASE_URL}/login`);
+    await page.locator('input[name="username"]').fill(username);
+    await page.locator('input[name="password"]').fill(password);
+    await page.locator('button[type="submit"]').click();
+    await expect(page).toHaveURL(`${BASE_URL}/complete-profile`);
+    await completeProfile(page);
+    await expect(page).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
+
+    // 1. Purchase Job Link Pro (Monthly) for real - same pattern as Suite 4.
+    await page.goto(`${BASE_URL}/subscription`);
+    await selectPlanAndContinue(page, 'Job Link Pro');
+    await expect(page.getByRole('heading', { name: 'Review Purchase', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Confirm and Pay' }).click();
+    await expect(page).toHaveURL(/checkout\.stripe\.com/, { timeout: 30_000 });
+    const emailField = page.getByLabel('Email');
+    if ((await emailField.count()) > 0 && !(await emailField.inputValue())) {
+      await emailField.fill(`${username}@example.com`);
+    }
+    await page.getByRole('textbox', { name: 'Card number' }).fill('4242424242424242');
+    await page.getByRole('textbox', { name: 'Expiration' }).fill('12/34');
+    await page.getByRole('textbox', { name: 'CVC' }).fill('123');
+    const cardholderNameField = page.getByRole('textbox', { name: 'Cardholder name' });
+    if ((await cardholderNameField.count()) > 0 && !(await cardholderNameField.inputValue())) {
+      await cardholderNameField.fill('QA Auto-Renewal Test');
+    }
+    const payButton = page.getByRole('button', { name: /Subscribe|Pay/ });
+    await expect(payButton).toBeVisible();
+    await payButton.click();
+    await expect(page).toHaveURL(/\/subscription\?success=true/, { timeout: 45_000 });
+
+    // 2. Capture the real "before" state: period end, invoice count, and the UI's own billing-date text.
+    const stripeCustomerId = await stripeFindCustomerByEmail(emailAlias);
+    const { id: subId, currentPeriodEnd: periodEndBefore } = await stripeFindActiveSubscription(stripeCustomerId);
+    const invoicesBefore = await stripeRequest('GET', `/invoices?subscription=${subId}&limit=10`);
+    const invoiceCountBefore = invoicesBefore.data?.length ?? 0;
+
+    await page.goto(`${BASE_URL}/subscription`);
+    const billingTextBefore = await page
+      .getByText(/^You are currently subscribed to the Job Link Pro \(Monthly\) plan\. Your next subscription will be billed on .+\.$/)
+      .textContent();
+
+    // 3. Advance a real Test Clock just past the period end - no
+    // cancellation scheduled anywhere, so this is a genuine renewal, not a lapse.
+    await stripeAttachClockAndAdvanceTo(stripeCustomerId, periodEndBefore);
+
+    // 4. The real proof: still 'active' (never canceled), a NEW period, and a NEW paid invoice.
+    const subAfter = await stripeRequest('GET', `/subscriptions/${subId}`);
+    expect(subAfter.status).toBe('active');
+    expect(subAfter.cancel_at_period_end).toBe(false);
+    const periodEndAfter = subAfter.items?.data?.[0]?.current_period_end;
+    expect(periodEndAfter).toBeGreaterThan(periodEndBefore);
+
+    const invoicesAfter = await stripeRequest('GET', `/invoices?subscription=${subId}&limit=10`);
+    expect(invoicesAfter.data?.length ?? 0).toBeGreaterThan(invoiceCountBefore);
+    const newestInvoice = invoicesAfter.data[0];
+    expect(newestInvoice.status).toBe('paid');
+
+    // 5. The UI itself reflects the new billing date after a fresh reload - not just Stripe's own record.
+    await page.goto(`${BASE_URL}/subscription`);
+    await expect(
+      page.getByText(/^You are currently subscribed to the Job Link Pro \(Monthly\) plan\. Your next subscription will be billed on .+\.$/)
+    ).toBeVisible({ timeout: 15_000 });
+    const billingTextAfter = await page
+      .getByText(/^You are currently subscribed to the Job Link Pro \(Monthly\) plan\. Your next subscription will be billed on .+\.$/)
+      .textContent();
+    expect(billingTextAfter).not.toBe(billingTextBefore);
+
+    await context.close();
   });
 });

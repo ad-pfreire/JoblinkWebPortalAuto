@@ -228,6 +228,77 @@ test.describe('Profile Settings', () => {
       await expect(page).toHaveURL(expectedRedirectUrl);
       await expect(page).toHaveTitle('Log In | Job Link');
     });
+
+    test("should show the account's real name/email and exactly 'Profile'/'Log Out' in the avatar menu, and navigate correctly on Profile", async ({
+      page,
+    }) => {
+      // 1. From /company (any page carries the same nav), open the avatar menu.
+      await page.goto(`${BASE_URL}/company`);
+      await page.getByRole('button', { name: 'account of current user' }).click();
+
+      // The menu header shows the real name/email, and the two menu items
+      // read exactly 'Profile'/'Log Out' - live-verified via direct DOM
+      // inspection that Playwright's own accessibility-tree snapshot
+      // renders these two menuitems with a blank name, even though
+      // getByRole('menuitem', { name }) still resolves them correctly
+      // (the same general "unreliable accessible-name computation"
+      // pattern already documented elsewhere in this app - see CLAUDE.md).
+      const menu = page.getByRole('menu');
+      await expect(menu.getByText(SEED_FIRST_NAME, { exact: false })).toBeVisible();
+      await expect(menu.getByText(SEED_EMAIL, { exact: true })).toBeVisible();
+      const profileItem = page.getByRole('menuitem', { name: 'Profile' });
+      const logOutItem = page.getByRole('menuitem', { name: 'Log Out' });
+      await expect(profileItem).toBeVisible();
+      await expect(logOutItem).toBeVisible();
+
+      // 2. Clicking 'Profile' performs a real navigation to /profile.
+      await profileItem.click();
+      await expect(page).toHaveURL(`${BASE_URL}/profile`);
+    });
+
+    test("clicking 'Log Out' in the avatar menu genuinely destroys the session server-side, not just a client-side redirect", async ({
+      page,
+    }) => {
+      // 1. From /company, open the avatar menu and click 'Log Out'.
+      await page.goto(`${BASE_URL}/company`);
+      await page.getByRole('button', { name: 'account of current user' }).click();
+      await page.getByRole('menuitem', { name: 'Log Out' }).click();
+      await expect(page).toHaveURL(`${BASE_URL}/login`);
+
+      // 2. A direct navigation back to a protected page afterwards redirects
+      // to /login with a real redirectUrl - the session was genuinely
+      // destroyed server-side, not merely hidden client-side (which could
+      // otherwise be bypassed by a plain back-button/direct URL visit).
+      await page.goto(`${BASE_URL}/company`);
+      await expect(page).toHaveURL(`${BASE_URL}/login?redirectUrl=${encodeURIComponent(`${BASE_URL}/company`)}`);
+    });
+
+    test('logging out in one tab genuinely logs out other open tabs sharing the same session', async ({ page }) => {
+      // 1. Open a second tab in the SAME browser context (shares cookies/session with `page`).
+      const secondTab = await page.context().newPage();
+      await secondTab.goto(`${BASE_URL}/company`);
+      await expect(secondTab.getByRole('link', { name: 'Edit' })).toBeVisible();
+
+      // 2. Log out from the FIRST tab.
+      await page.goto(`${BASE_URL}/company`);
+      await page.getByRole('button', { name: 'account of current user' }).click();
+      await page.getByRole('menuitem', { name: 'Log Out' }).click();
+      await expect(page).toHaveURL(`${BASE_URL}/login`);
+
+      // 3. The second tab, left untouched, is checked WITHOUT any reload of
+      // its own first - does the app push a live logout to it? Given a few
+      // seconds' grace for any such mechanism, before falling back to
+      // proving the session is at least genuinely shared (its own next
+      // real navigation correctly reflects the logout server-side).
+      await secondTab.waitForTimeout(3_000);
+      const secondTabUrl = secondTab.url();
+      const wasLivePushed = secondTabUrl.startsWith(`${BASE_URL}/login`);
+      if (!wasLivePushed) {
+        await secondTab.goto(`${BASE_URL}/company`);
+        await expect(secondTab).toHaveURL(`${BASE_URL}/login?redirectUrl=${encodeURIComponent(`${BASE_URL}/company`)}`);
+      }
+      await secondTab.close();
+    });
   });
 
   test.describe('Editing Name Fields and the Save Button', () => {
@@ -371,6 +442,14 @@ test.describe('Profile Settings', () => {
       await expect(firstNameInput).toHaveValue(longFirstName);
       await expect(saveButton).toBeEnabled();
 
+      // No page-level layout break from this - same scrollWidth/clientWidth
+      // check already established for Payments' and Company Details' own long-value tests.
+      const { bodyScrollWidth, bodyClientWidth } = await page.evaluate(() => ({
+        bodyScrollWidth: document.body.scrollWidth,
+        bodyClientWidth: document.body.clientWidth,
+      }));
+      expect(bodyScrollWidth).toBe(bodyClientWidth);
+
       // 2. Save, then reload - the full 243 characters genuinely persisted.
       await saveButton.click();
       await expect(page.locator('text=Your profile was updated successfully!')).toBeVisible();
@@ -382,6 +461,37 @@ test.describe('Profile Settings', () => {
       await saveAndWaitForSuccess(page, saveButton);
       await page.goto(`${BASE_URL}/profile`);
       await expect(firstNameInput).toHaveValue(SEED_FIRST_NAME);
+    });
+
+    test("should accept names with accents, hyphens, and apostrophes (e.g. José, O'Brien) and persist them exactly", async ({ page }) => {
+      const firstNameInput = page.locator('input[name="firstName"]');
+      const lastNameInput = page.locator('input[name="lastName"]');
+      const saveButton = page.getByRole('button', { name: 'Save' });
+      const specialFirstName = 'José-María';
+      const specialLastName = "O'Brien";
+
+      // 1. Type real-world names with an accented character, a hyphen, and an apostrophe.
+      await firstNameInput.fill(specialFirstName);
+      await lastNameInput.fill(specialLastName);
+      await expect(page.locator('text=The field is required')).toHaveCount(0);
+      await expect(firstNameInput).toHaveValue(specialFirstName);
+      await expect(lastNameInput).toHaveValue(specialLastName);
+      await expect(saveButton).toBeEnabled();
+
+      // 2. Save, then reload - both values persist exactly, no character stripped/altered.
+      await saveButton.click();
+      await expect(page.locator('text=Your profile was updated successfully!')).toBeVisible();
+      await page.goto(`${BASE_URL}/profile`);
+      await expect(firstNameInput).toHaveValue(specialFirstName);
+      await expect(lastNameInput).toHaveValue(specialLastName);
+
+      // 3. Cleanup: restore, confirmed via reload.
+      await firstNameInput.fill(SEED_FIRST_NAME);
+      await lastNameInput.fill(SEED_LAST_NAME);
+      await saveAndWaitForSuccess(page, saveButton);
+      await page.goto(`${BASE_URL}/profile`);
+      await expect(firstNameInput).toHaveValue(SEED_FIRST_NAME);
+      await expect(lastNameInput).toHaveValue(SEED_LAST_NAME);
     });
 
     test('should send only a single save request on a rapid double-click of Save', async ({ page }) => {
