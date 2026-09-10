@@ -63,6 +63,7 @@ Playwright QA suite for the Job Link web portal (Fieldpiece pre-staging: `https:
 - [Portability: multiple people/environments running this suite](#portability-multiple-peopleenvironments-running-this-suite)
 
 **Conventions, Git & Running Tests**
+- [Shared helper modules (and why splitting a spec file is NOT the way to shrink it)](#shared-helper-modules-and-why-splitting-a-spec-file-is-not-the-way-to-shrink-it)
 - [Conventions for new spec files](#conventions-for-new-spec-files)
 - [Git / commits](#git-commits)
 - [Running tests](#running-tests)
@@ -113,7 +114,7 @@ Live-verified via direct DOM inspection (`browser_run_code_unsafe` against a rea
 
 **Actively used by `tests/teams-plan-gating.spec.ts`, `tests/account-deletion-billing.spec.ts`, `tests/payments.spec.ts` test 6.5, and `tests/subscription.spec.ts` Suite 7** (live-verified end-to-end) - not just a speculative future capability. `teams-plan-gating.spec.ts`'s own `beforeAll` drives a real Stripe Test Clock directly via the REST API (plain `fetch()`, no `stripe` SDK dependency) to simulate real subscription time-passage: a normal disposable account never reaches a genuinely-lapsed-to-Free state on its own, since Stripe won't let a real billing period elapse in the time span of a test run. [Stripe Test Clocks](https://docs.stripe.com/billing/testing/test-clocks) solve this by simulating the passage of time on a real test-mode subscription, so the app receives the same webhook it would in production. See that file and `specs/teams-plan-gating-test-plan.md` for the full pattern (register → real Checkout purchase → real in-app cancellation → attach clock to the resulting customer → advance past `current_period_end` → poll for `ready` → confirm `status: "canceled"` before touching the UI at all).
 
-**`tests/utils/stripe.ts`** holds the shared, reusable pieces of this pattern (`stripeRequest()`, `stripeFindCustomerByEmail()`, `stripeListCardPaymentMethods()`, `stripeFindSubscription()`) - extracted 2026-08-28 once a second consumer (`payments.spec.ts` test 6.5, see below) needed the same plain-`fetch()` Stripe REST pattern `account-deletion-billing.spec.ts` had already proven, so it wouldn't need its own third copy; `stripeFindSubscription()` was added the same day for a third consumer, `subscription.spec.ts` Suite 7 (see below). `account-deletion-billing.spec.ts` and `teams-plan-gating.spec.ts` still keep their own module-level copies of `stripeRequest()`/`stripeFindCustomerByEmail()` (deliberately not refactored to import the shared version - both were already live-verified and committed, and touching working, already-tested files for a pure DRY cleanup wasn't worth the risk). Any NEW file needing basic Stripe REST access should import from `tests/utils/stripe.ts` rather than adding a fourth copy.
+**`tests/utils/stripe.ts`** holds the shared, reusable pieces of this pattern (`stripeRequest()`, `stripeFindCustomerByEmail()`, `stripeListCardPaymentMethods()`, `stripeFindSubscription()`) - extracted 2026-08-28 once a second consumer (`payments.spec.ts` test 6.5, see below) needed the same plain-`fetch()` Stripe REST pattern `account-deletion-billing.spec.ts` had already proven, so it wouldn't need its own third copy; `stripeFindSubscription()` was added the same day for a third consumer, `subscription.spec.ts` Suite 7 (see below). **Updated 2026-09-10**: `account-deletion-billing.spec.ts` and `teams-plan-gating.spec.ts` used to keep their own module-level copies of `stripeRequest()`/`stripeFindCustomerByEmail()`, deliberately left un-refactored on a risk argument. That decision was reversed after the duplication caused a real, concrete problem - see "Shared helper modules" below. Every file now imports from `tests/utils/stripe.ts`; never add a local copy of a Stripe REST helper.
 
 **`payments.spec.ts` test 6.5** (closed a previously-documented "known verification gap" - see `specs/payments-test-plan.md` section 6.5 and finding 16): live-verified that resubmitting the exact same card as the currently-saved one never leaves a duplicate Stripe PaymentMethod behind, by querying `GET /v1/payment_methods?customer=<id>&type=card` before and after. The real mechanism is more interesting than "detects and skips" - Stripe creates a genuinely NEW PaymentMethod object on every single resubmission (different `id`, same `card.fingerprint`), and the app's backend cleanly detaches the previous one from the customer in the same save, so the count never grows. This required no new key permissions - `Customers: Read` already covers listing a customer's payment methods.
 
@@ -319,6 +320,29 @@ This suite is designed to work against **any** seed account configured via `TEST
 ---
 
 **Conventions, Git & Running Tests**
+
+## Shared helper modules (and why splitting a spec file is NOT the way to shrink it)
+
+Extracted 2026-09-10, reversing the older "per-file-helper" convention. Import from these rather than re-declaring a local copy:
+
+| Module | Holds |
+| --- | --- |
+| `tests/utils/auth.ts` | `login()`, `loginAndGoToCompany()` - the real login form flow (landing URL matches `/company` OR `/teams/list` on purpose) |
+| `tests/utils/stripe.ts` | Stripe REST API (`stripeRequest()`, `stripeFindCustomerByEmail()`, `stripeFindActiveSubscription()`, `pollTestClockUntilReady()`, …) |
+| `tests/utils/stripe-elements.ts` | Stripe Elements **iframe** resolution (`resolveStripeFrameByContent()`, `billingAddressFrame()`, `cardElementFrame()`) |
+| `tests/utils/subscription-ui.ts` | `/subscription` plan cards (`getPlanCardState()`, `clickPlanCard()`, `selectPlanAndContinue()`, `cancelSubscriptionAndFinish()`) |
+| `tests/utils/forms.ts` | `clearFieldWithBackspace()` |
+
+**Why this was worth reversing the old decision**: the duplication was the direct cause of three separate incidents. Two are documented above (the Company Name `fill()` race fixed in 4.1 but not 4.1b; `getVerificationLink()` fixed as `getInvitationLink()` but never replicated). The third was found *by* this extraction: `account-deletion-billing.spec.ts` was still carrying a **stale** `stripeFindCustomerByEmail()` with no Search fallback - the 2026-09-08 Test Clock fix had been applied to `utils/stripe.ts` and `teams-plan-gating.spec.ts` but never to that third copy, in a file that genuinely uses Test Clocks. It had not fired yet only because its lookups happen before the clock is attached.
+
+Two rules learned doing it, both worth keeping:
+
+- **Only unify what is genuinely identical.** Every candidate was `diff`ed first. `cancelSubscriptionAndFinish()` was byte-identical in 3 files → shared. But `account-deletion-billing.spec.ts`'s own `selectPlanAndContinue()` *always* clicks the plan card, while the shared one clicks only when not already selected - similar-looking, different semantics, so it stays local on purpose. Do not "clean up" that one.
+- **Prefer a thin local wrapper over rewriting call sites.** `loginAsDisposableAndGoToCompany()` still exists by that name in 5 files (25 call sites in `payment-history.spec.ts` alone); each is now a 1-line delegation to `loginAndGoToCompany()`, closing over that file's own module-level credentials. Zero call sites touched, one place to fix. Watch for name collisions when importing: `account-deletion-billing.spec.ts`'s former local `stripeFindSubscription()` returned `currentPeriodEnd`, which is the shared `stripeFindActiveSubscription()`, NOT the shared same-named `stripeFindSubscription()` (that one returns `cancelAtPeriodEnd`) - it imports with an alias for exactly this reason.
+
+**Do NOT try to shrink a large spec file by splitting it into several spec files.** In Playwright the *file* is the unit of isolation: `test.beforeAll` and `test.describe.configure({ mode: 'serial' })` are per-file, and Playwright guarantees no ordering *between* files. Splitting e.g. `payments.spec.ts` would mean each new file registers its own disposable account and waits on its own real verification email (240s), multiplying real-email load - the exact burst this project has repeatedly seen degrade that pipeline - while breaking tests that depend on state built up by an earlier test, and breaking the `testMatch`/`testIgnore` regexes of the four dedicated projects in `playwright.config.ts`. Shrink by moving non-`test()` code into the modules above instead. A spec file's real quality metric is "does each test read on its own, with no duplicated logic", not a line count.
+
+**The one real exception**: a `test.describe` that is genuinely self-contained (registers its own accounts *inside* its tests, does not use the file's `beforeAll` and does not depend on serial state from it) can move to its own file at no extra cost, since it already pays for its own setup. `tests/teams.spec.ts` lines 1765+ are currently the only known case - five top-level describes that qualify. Not done yet; verify the autonomy claim still holds before acting on it.
 
 ## Conventions for new spec files
 
