@@ -566,9 +566,15 @@ test.describe('Company Details', () => {
       const originalName = await companyDetailsCard(secondPage).getByRole('heading', { level: 6 }).first().textContent();
 
       // 2. In the FIRST session, change and save a new Company Name.
+      // Real-keystroke clearing, not fill() - live-verified fill() can
+      // occasionally fail to clear this specific field first, appending onto
+      // the existing value instead of replacing it and corrupting the shared
+      // seed account's real Company Name (see CLAUDE.md, and the 2026-09-10
+      // CI incident where this exact test's restore step below did exactly that).
       await page.goto(`${BASE_URL}/company?edit=true`);
       const companyName = page.getByRole('textbox', { name: 'Company Name' });
-      await companyName.fill('QA Automation Test Co FRESH-CHECK');
+      await clearFieldWithBackspace(page, companyName);
+      await companyName.pressSequentially('QA Automation Test Co FRESH-CHECK');
       await saveCompanyDetailsAndWaitForNavigation(page);
       await expect(companyDetailsCard(page).getByRole('heading', { name: 'QA Automation Test Co FRESH-CHECK' })).toBeVisible();
 
@@ -579,10 +585,19 @@ test.describe('Company Details', () => {
       await secondContext.close();
 
       // Cleanup: restore the baseline name the rest of this file depends on.
+      // Same real-keystroke clear as step 2, and the restore is verified via
+      // a retry loop, not a single check, matching test 4.1's own hardened
+      // restore pattern - this exact field has proven capable of a real
+      // (if rare) clear-timing race on both the temp-value save AND the restore.
+      const restoreName = originalName || 'QA Automation Test Co';
       await page.goto(`${BASE_URL}/company?edit=true`);
-      await companyName.fill(originalName || 'QA Automation Test Co');
+      await clearFieldWithBackspace(page, companyName);
+      await companyName.pressSequentially(restoreName);
       await saveCompanyDetailsAndWaitForNavigation(page);
-      await expect(companyDetailsCard(page).getByRole('heading', { name: originalName || 'QA Automation Test Co' })).toBeVisible();
+      await expect(async () => {
+        await page.goto(`${BASE_URL}/company`);
+        await expect(companyDetailsCard(page).getByRole('heading', { name: restoreName, exact: true })).toBeVisible({ timeout: 5_000 });
+      }).toPass({ timeout: 30_000 });
     });
 
     test("4.2 The read-only card's 'Phone Number' maps specifically to Mobile Phone Number, not Office Phone Number", async ({ page }) => {
