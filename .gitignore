@@ -10,6 +10,7 @@ node_modules/
 .playwright-mcp/
 specs/
 handoff.md
+bug-triage.md
 
 # Personal learning guide (not shared with the team)
 /learning/

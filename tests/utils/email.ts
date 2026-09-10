@@ -32,6 +32,13 @@ function resolveRealDestination(href: string): string {
  * unused: combining `to` with a same-day `since` can spuriously return zero
  * results (see CLAUDE.md); safe here since every caller passes a never-used alias.
  *
+ * Filters by subject, not just `to` — an invitee address that already has a
+ * "New Invitation!" email waiting (see `getInvitationLink()`, e.g. `teams.spec.ts`
+ * test 6.7, which invites the same address before it registers) can otherwise
+ * match that older email first and throw on the regex instead of waiting for
+ * the real verification email to arrive. Same root cause `getInvitationLink()`
+ * was already fixed for; this one just hadn't hit it yet.
+ *
  * @returns The real (Mandrill-unwrapped) verification link.
  */
 export async function getVerificationLink(toAddress: string, sentAfter: Date, timeoutMs = 150000): Promise<string> {
@@ -52,7 +59,7 @@ export async function getVerificationLink(toAddress: string, sentAfter: Date, ti
     try {
       const lock = await client.getMailboxLock('INBOX');
       try {
-        const uids = await client.search({ to: toAddress }, { uid: true });
+        const uids = await client.search({ to: toAddress, subject: 'Job Link Registration Confirmation' }, { uid: true });
         if (uids && uids.length > 0) {
           const latestUid = uids[uids.length - 1];
           const message = await client.fetchOne(latestUid, { source: true }, { uid: true });
