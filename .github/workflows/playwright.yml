@@ -19,16 +19,20 @@ concurrency:
   cancel-in-progress: false
 jobs:
   test:
-    # Was 60 - the run right after tests/payments.spec.ts (30 tests, several
-    # genuinely slow real flows: 3D Secure, a real Stripe Checkout
-    # subscription purchase) was added got hard-killed by this cap ("The job
-    # has exceeded the maximum execution time of 1h0m0s", not a test
-    # failure) rather than completing with a pass/fail verdict. The
-    # pre-Payments "core" step alone already ran ~21m locally-equivalent: 90
-    # gives real headroom for the larger suite plus this file's own
-    # real-email-dependent beforeAll occasionally needing its full retry
-    # budget under degraded pre-staging email delivery.
-    timeout-minutes: 90
+    # 60 -> 90 -> 120. Each bump followed the same symptom: the job getting
+    # hard-killed by this cap ("The job has exceeded the maximum execution
+    # time", not a test failure) instead of reaching a pass/fail verdict.
+    #
+    # 90 was measured as genuinely insufficient (2026-09-10), not just
+    # unlucky: setup+typecheck+lint+browsers ~8m, the "core" step ~30m, and
+    # the real-email step ~60m is ~98m of real work. The one run that did
+    # finish under 90 came in at 1h29m27s - 33 seconds of margin. Two of the
+    # three runs around it were cancelled mid-real-email.
+    #
+    # The cap alone was never the whole fix, though - see the real-email
+    # step's own timeout-minutes below for why the job was going red even
+    # though that step is explicitly allowed to fail.
+    timeout-minutes: 120
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -97,8 +101,23 @@ jobs:
     # step is allowed to fail without failing the workflow or blocking a PR
     # merge — it still runs and reports so a real, lasting break in these
     # flows stays visible instead of silently ignored.
+    # timeout-minutes here is load-bearing and NOT redundant with the job's
+    # own cap. `continue-on-error` only covers this step exiting non-zero
+    # (i.e. tests failing); it does NOT cover the JOB being cancelled for
+    # exceeding its cap while this step is still running. Without a step-level
+    # cap, this step just consumes whatever time the job has left, and a slow
+    # real-email run takes the whole workflow down with it - the run goes red,
+    # and the report artifact below never uploads (its `!cancelled()` guard
+    # skips it), which is exactly the opposite of "allowed to fail without
+    # blocking". Live-verified twice on 2026-09-10, both times with the
+    # blocking "core" step already green.
+    # With a step-level cap, a slow/hung real-email run fails just this step,
+    # `continue-on-error` absorbs it, the artifact still uploads, and the job
+    # ends green - the intended semantics. 70 leaves real headroom over the
+    # ~60m this step actually takes, while still fitting inside the job's 120.
     - name: Run Playwright tests (real email, known flaky)
       continue-on-error: true
+      timeout-minutes: 70
       run: npx playwright test --grep @real-email --output=test-results-real-email
       env:
         PLAYWRIGHT_HTML_REPORT: playwright-report-real-email
