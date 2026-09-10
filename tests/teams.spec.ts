@@ -1,10 +1,12 @@
 // spec: specs/teams-test-plan.md
 // seed: tests/seed.spec.ts
 
-import { test, expect, Page, Locator, devices } from '@playwright/test';
+import { test, expect, Page, devices } from '@playwright/test';
 import { requireEnv } from './utils/env';
+import { clearFieldWithBackspace } from './utils/forms';
 import { getVerificationLink, getInvitationLink, checkForAnyEmail } from './utils/email';
 import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from './utils/account';
+import { loginAndGoToCompany } from './utils/auth';
 
 const BASE_URL = requireEnv('BASE_URL');
 
@@ -17,12 +19,7 @@ let inviteeEmail: string;
 
 /** Logs in with the disposable account from `beforeAll` and lands on /company. */
 async function loginAsDisposableAndGoToCompany(page: Page) {
-  await page.goto(`${BASE_URL}/login`);
-  await page.locator('input[name="username"]').fill(disposableUsername);
-  await page.locator('input[name="password"]').fill(disposablePassword);
-  await page.locator('button[type="submit"]').click();
-  await expect(page).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
-  await page.goto(`${BASE_URL}/company`);
+  await loginAndGoToCompany(page, disposableUsername, disposablePassword);
 }
 
 /**
@@ -54,16 +51,6 @@ async function loginAsInvitee(page: Page) {
 function teamCard(page: Page, teamName: string) {
   const name = `${teamName} 1 member QA`;
   return page.getByRole('button', { name }).or(page.getByRole('link', { name }));
-}
-
-/** Clears a field via real Backspace keystrokes, not fill('') (see CLAUDE.md's validation-timing gotcha). */
-async function clearFieldWithBackspace(page: Page, field: Locator) {
-  await field.click();
-  await page.keyboard.press('End');
-  const currentLength = (await field.inputValue()).length;
-  for (let i = 0; i < currentLength; i++) {
-    await page.keyboard.press('Backspace');
-  }
 }
 
 /** Opens 'Update Team Name' via the unlabeled edit icon - the only button with an empty accessible name inside `<main>` on a team's detail view. */

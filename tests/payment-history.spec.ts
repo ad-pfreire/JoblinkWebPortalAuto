@@ -6,6 +6,7 @@ import { PDFParse } from 'pdf-parse';
 import { requireEnv } from './utils/env';
 import { getVerificationLink } from './utils/email';
 import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from './utils/account';
+import { loginAndGoToCompany } from './utils/auth';
 import { stripeRequest, stripeFindCustomerByEmail } from './utils/stripe';
 import { getUserByEmail, findAnyCollectionReferencing } from './utils/mongo';
 
@@ -21,22 +22,12 @@ let disposableEmail: string;
 
 /** Logs in with the disposable account from `beforeAll` and lands on /company. */
 async function loginAsDisposableAndGoToCompany(page: Page) {
-  await page.goto(`${BASE_URL}/login`);
-  await page.locator('input[name="username"]').fill(disposableUsername);
-  await page.locator('input[name="password"]').fill(disposablePassword);
-  await page.locator('button[type="submit"]').click();
-  await expect(page).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
-  await page.goto(`${BASE_URL}/company`);
+  await loginAndGoToCompany(page, disposableUsername, disposablePassword);
 }
 
 /** Logs in with the shared seed account - used ONLY by 1.1, strictly read-only, since it never touches Payments/Subscription elsewhere (see CLAUDE.md). */
 async function loginAsSeedAndGoToCompany(page: Page) {
-  await page.goto(`${BASE_URL}/login`);
-  await page.locator('input[name="username"]').fill(SEED_USERNAME);
-  await page.locator('input[name="password"]').fill(SEED_PASSWORD);
-  await page.locator('button[type="submit"]').click();
-  await expect(page).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
-  await page.goto(`${BASE_URL}/company`);
+  await loginAndGoToCompany(page, SEED_USERNAME, SEED_PASSWORD);
 }
 
 /** Switches billing interval via /subscription's 'Update Subscription' dialog, always clicking the plan card first ('Continue' silently no-ops otherwise, see CLAUDE.md). `'toggle'` switches away from whatever interval is currently active. */

@@ -1,5 +1,6 @@
 import { test, expect, Page, Locator } from '@playwright/test';
 import { requireEnv } from './utils/env';
+import { login } from './utils/auth';
 import { getVerificationLink } from './utils/email';
 import {
   generateUniqueEmailAlias,
@@ -24,11 +25,7 @@ let SEED_PHONE_DIGITS: string;
 
 /** Logs in as the shared seed account and lands on /profile, without asserting the name fields' values (used before they're known too). */
 async function loginAsSeed(page: Page) {
-  await page.goto(`${BASE_URL}/login`);
-  await page.locator('input[name="username"]').fill(SEED_USERNAME);
-  await page.locator('input[name="password"]').fill(SEED_PASSWORD);
-  await page.locator('button[type="submit"]').click();
-  await expect(page).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
+  await login(page, SEED_USERNAME, SEED_PASSWORD);
   await page.goto(`${BASE_URL}/profile`);
   await expect(page.locator('input[name="firstName"]')).not.toHaveValue('');
 }

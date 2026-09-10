@@ -1,8 +1,10 @@
 // spec: specs/company-details-test-plan.md
 // seed: tests/seed.spec.ts
 
-import { test, expect, Page, Locator } from '@playwright/test';
+import { test, expect, Page } from '@playwright/test';
 import { requireEnv } from './utils/env';
+import { clearFieldWithBackspace } from './utils/forms';
+import { loginAndGoToCompany } from './utils/auth';
 
 const BASE_URL = requireEnv('BASE_URL');
 const SEED_USERNAME = requireEnv('TEST_USERNAME');
@@ -10,12 +12,7 @@ const SEED_PASSWORD = requireEnv('TEST_LOGIN_PASSWORD');
 
 /** Logs in as the shared seed account and lands on /company. */
 async function loginAsSeedAndGoToCompany(page: Page) {
-  await page.goto(`${BASE_URL}/login`);
-  await page.locator('input[name="username"]').fill(SEED_USERNAME);
-  await page.locator('input[name="password"]').fill(SEED_PASSWORD);
-  await page.locator('button[type="submit"]').click();
-  await expect(page).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
-  await page.goto(`${BASE_URL}/company`);
+  await loginAndGoToCompany(page, SEED_USERNAME, SEED_PASSWORD);
   await expect(page.getByRole('link', { name: 'Edit' })).toBeVisible();
 }
 
@@ -27,16 +24,6 @@ function companyDetailsCard(page: Page) {
 /** Scopes to a phone field's wrapper - its country-flag combobox has no accessible name of its own. */
 function phoneFieldContainer(page: Page, label: string) {
   return page.locator('.MuiFormControl-root').filter({ hasText: label });
-}
-
-/** Clears a field via real Backspace keystrokes, not fill('') (see CLAUDE.md's validation-timing gotcha). */
-async function clearFieldWithBackspace(page: Page, field: Locator) {
-  await field.click();
-  await page.keyboard.press('End');
-  const currentLength = (await field.inputValue()).length;
-  for (let i = 0; i < currentLength; i++) {
-    await page.keyboard.press('Backspace');
-  }
 }
 
 /** Clicks 'Save', waits for the real 200 response, then the redirect - this flow has no success toast (see test 4.1). */

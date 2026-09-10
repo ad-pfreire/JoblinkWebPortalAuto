@@ -6,10 +6,16 @@ import { MongoClient } from 'mongodb';
 import { requireEnv } from './utils/env';
 import { getVerificationLink, getInvitationLink } from './utils/email';
 import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from './utils/account';
+import { login, loginAndGoToCompany } from './utils/auth';
+// Drives a real Stripe Test Clock via the REST API to simulate a subscription
+// genuinely lapsing to Free - no UI interaction can do that within a test run.
+import { stripeRequest, stripeFindCustomerByEmail, stripeFindActiveSubscription, pollTestClockUntilReady } from './utils/stripe';
+import { getPlanCardState, selectPlanAndContinue, cancelSubscriptionAndFinish } from './utils/subscription-ui';
+// Suite 7's "Resume Subscription" dialog reuses /payments' own embedded Stripe
+// Elements component, so the same iframe-swap/mounting gotchas apply.
+import { billingAddressFrame, cardElementFrame } from './utils/stripe-elements';
 
 const BASE_URL = requireEnv('BASE_URL');
-const STRIPE_KEY = requireEnv('STRIPE_TEST_RESTRICTED_KEY');
-const STRIPE_API = 'https://api.stripe.com/v1';
 const MONGO_URI = requireEnv('MONGODB_PRESTAGING_URI');
 
 let disposableUsername: string;
@@ -22,74 +28,6 @@ let memberMongoId: string;
 let memberTierWhileOwnerActive: string | null;
 
 // This file's CI-only Chromium software-rendering flags (see CLAUDE.md) live in its own dedicated project in playwright.config.ts, not a file-level test.use() here.
-
-// --- Stripe REST API helpers ---
-// Drives a real Stripe Test Clock directly via the REST API to simulate a
-// subscription genuinely lapsing to Free - no UI interaction can do that within a test run's timespan (see CLAUDE.md).
-async function stripeRequest(method: 'GET' | 'POST', path: string, body?: Record<string, string>) {
-  const headers: Record<string, string> = {
-    Authorization: `Basic ${Buffer.from(`${STRIPE_KEY}:`).toString('base64')}`,
-  };
-  let requestBody: string | undefined;
-  if (body) {
-    headers['Content-Type'] = 'application/x-www-form-urlencoded';
-    requestBody = new URLSearchParams(body).toString();
-  }
-  const response = await fetch(`${STRIPE_API}${path}`, { method, headers, body: requestBody });
-  const json = await response.json();
-  if (!response.ok) {
-    throw new Error(`Stripe API ${method} ${path} failed (${response.status}): ${JSON.stringify(json)}`);
-  }
-  return json;
-}
-
-// The List endpoint silently excludes a customer once a Test Clock has been
-// attached to it (see tests/utils/stripe.ts's copy of this function) -
-// falls back to Search only when List comes back empty.
-async function stripeFindCustomerByEmail(email: string): Promise<string> {
-  const result = await stripeRequest('GET', `/customers?email=${encodeURIComponent(email)}&limit=1`);
-  if (result.data?.length) {
-    return result.data[0].id;
-  }
-  const query = encodeURIComponent(`email:'${email.replace(/'/g, "\\'")}'`);
-  const headers: Record<string, string> = {
-    Authorization: `Basic ${Buffer.from(`${STRIPE_KEY}:`).toString('base64')}`,
-    'Stripe-Version': '2024-06-20',
-  };
-  const searchResponse = await fetch(`${STRIPE_API}/customers/search?query=${query}`, { method: 'GET', headers });
-  const searchJson = await searchResponse.json();
-  if (searchResponse.ok && searchJson.data?.length) {
-    return searchJson.data[0].id;
-  }
-  throw new Error(`No Stripe customer found for email ${email} (checked both List and Search).`);
-}
-
-async function stripeFindActiveSubscription(customerId: string): Promise<{ id: string; currentPeriodEnd: number }> {
-  const result = await stripeRequest('GET', `/subscriptions?customer=${customerId}&status=all&limit=1`);
-  if (!result.data?.length) {
-    throw new Error(`No subscription found for Stripe customer ${customerId}`);
-  }
-  const sub = result.data[0];
-  const currentPeriodEnd = sub.items?.data?.[0]?.current_period_end;
-  if (!currentPeriodEnd) {
-    throw new Error(`Subscription ${sub.id} has no current_period_end on its first item: ${JSON.stringify(sub.items)}`);
-  }
-  return { id: sub.id, currentPeriodEnd };
-}
-
-/** Polls a test clock until 'ready', or throws on failure - a full-period advance can take up to roughly a minute. */
-async function pollTestClockUntilReady(clockId: string, maxWaitMs = 120_000) {
-  const deadline = Date.now() + maxWaitMs;
-  while (Date.now() < deadline) {
-    const clock = await stripeRequest('GET', `/test_helpers/test_clocks/${clockId}`);
-    if (clock.status === 'ready') return clock;
-    if (clock.status === 'internal_failure') {
-      throw new Error(`Test clock ${clockId} failed: ${JSON.stringify(clock)}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 3_000));
-  }
-  throw new Error(`Test clock ${clockId} did not reach 'ready' within ${maxWaitMs}ms`);
-}
 
 /** Attaches a test clock to an existing customer and advances it past the period end, so the scheduled cancellation takes effect (never deleted after - see CLAUDE.md). */
 async function attachClockAndAdvancePastPeriodEnd(customerId: string, currentPeriodEnd: number): Promise<void> {
@@ -147,23 +85,14 @@ async function getDelegatedMembershipTier(ownerId: string, memberId: string): Pr
 
 // --- App login/navigation and plan-card helpers, duplicated from subscription.spec.ts (see that file's own comment on why these aren't shared) ---
 async function loginAsDisposableAndGoToCompany(page: Page) {
-  await page.goto(`${BASE_URL}/login`);
-  await page.locator('input[name="username"]').fill(disposableUsername);
-  await page.locator('input[name="password"]').fill(disposablePassword);
-  await page.locator('button[type="submit"]').click();
-  await expect(page).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
-  await page.goto(`${BASE_URL}/company`);
+  await loginAndGoToCompany(page, disposableUsername, disposablePassword);
 }
 
 // Generic login for the second (member) disposable account - every
 // disposable account in this project shares the same TEST_REGISTER_PASSWORD
 // value, so disposablePassword works for both.
 async function loginAs(page: Page, username: string) {
-  await page.goto(`${BASE_URL}/login`);
-  await page.locator('input[name="username"]').fill(username);
-  await page.locator('input[name="password"]').fill(disposablePassword);
-  await page.locator('button[type="submit"]').click();
-  await expect(page).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
+  await login(page, username, disposablePassword);
 }
 
 // Reuses the exact invite -> real email -> accept pattern already proven in
@@ -194,44 +123,6 @@ async function inviteAndAcceptMember(
   await memberPage.getByTestId('accept-btn').click();
   await expect(memberPage).toHaveURL(`${BASE_URL}/company`, { timeout: 15_000 });
   await memberContext.close();
-}
-
-const SELECTED_CARD_BACKGROUND = 'rgba(255, 196, 0, 0.25)';
-
-async function getPlanCardState(page: Page, planName: string): Promise<{ selected: boolean; cursor: string; text: string }> {
-  return page.evaluate(
-    ({ name, selectedBg }) => {
-      const heading = Array.from(document.querySelectorAll('h4')).find((h) => h.textContent === name);
-      if (!heading) throw new Error(`No plan card heading found for "${name}"`);
-      const card = heading.parentElement?.parentElement;
-      if (!card) throw new Error(`Could not find card ancestor for "${name}"`);
-      const style = getComputedStyle(card);
-      return { selected: style.backgroundColor === selectedBg, cursor: style.cursor, text: card.textContent || '' };
-    },
-    { name: planName, selectedBg: SELECTED_CARD_BACKGROUND }
-  );
-}
-
-async function clickPlanCard(page: Page, planName: string) {
-  await page.getByRole('heading', { name: planName, exact: true }).click();
-}
-
-async function selectPlanAndContinue(page: Page, planName: string) {
-  const state = await getPlanCardState(page, planName);
-  if (!state.selected) {
-    await clickPlanCard(page, planName);
-  }
-  await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeEnabled();
-  await page.getByRole('button', { name: 'Continue', exact: true }).click();
-}
-
-async function cancelSubscriptionAndFinish(page: Page) {
-  await page.getByRole('button', { name: 'Cancel Subscription', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Cancel Subscription', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Finish Cancellation' }).click();
-  await expect(
-    page.getByText(/^You are currently on the .+ plan\. You will lose these features on .+ unless you resubscribe\.$/)
-  ).toBeVisible();
 }
 
 test.describe('Teams Plan Gating', () => {
@@ -458,44 +349,6 @@ test.describe('Teams Plan Gating', () => {
     });
   });
 });
-
-// --- Stripe iframe helpers, duplicated from subscription.spec.ts (per-file-helper convention - see CLAUDE.md) ---
-// Needed only by Suite 7 below ("Resume Subscription"), whose dialog reuses
-// the same embedded Stripe Elements Billing Address/Card component as
-// /payments' own form - the same iframe-swap/mounting gotchas apply.
-async function resolveStripeFrameByContent(page: Page, iframeTitle: string, expectedFieldName: string, timeoutMs = 15_000) {
-  const deadline = Date.now() + timeoutMs;
-  let lastCandidateCount = 0;
-  while (Date.now() < deadline) {
-    const candidates = page.locator(`iframe[title="${iframeTitle}"]`);
-    lastCandidateCount = await candidates.count();
-    for (let i = 0; i < lastCandidateCount; i++) {
-      const candidate = candidates.nth(i);
-      try {
-        if ((await candidate.contentFrame().getByRole('textbox', { name: expectedFieldName }).count()) > 0) {
-          const frameName = await candidate.getAttribute('name');
-          return page.frameLocator(`iframe[name="${frameName}"]`);
-        }
-      } catch {
-        // Fall through to the next poll iteration.
-      }
-    }
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-  throw new Error(
-    `No iframe titled "${iframeTitle}" (out of ${lastCandidateCount} candidate(s)) contained a "${expectedFieldName}" textbox within ${timeoutMs}ms.`
-  );
-}
-
-async function billingAddressFrame(page: Page) {
-  const frame = await resolveStripeFrameByContent(page, 'Secure address input frame', 'Full name');
-  await frame.locator('#billingAddress-addressLine1Input').waitFor({ state: 'attached', timeout: 15_000 });
-  return frame;
-}
-
-async function cardElementFrame(page: Page) {
-  return resolveStripeFrameByContent(page, 'Secure payment input frame', 'Card number');
-}
 
 async function fillAndSubmitResumeDialogPaymentMethod(page: Page, cardNumber: string) {
   const fieldTimeout = { timeout: 10_000 };

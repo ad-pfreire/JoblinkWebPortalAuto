@@ -5,6 +5,7 @@ import { test, expect, Page, devices } from '@playwright/test';
 import { requireEnv } from './utils/env';
 import { getVerificationLink } from './utils/email';
 import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from './utils/account';
+import { loginAndGoToCompany } from './utils/auth';
 import {
   stripeFindCustomerByEmail,
   stripeListCardPaymentMethods,
@@ -12,6 +13,7 @@ import {
   stripeRequest,
   stripeAttachClockAndAdvanceTo,
 } from './utils/stripe';
+import { billingAddressFrame, cardElementFrame } from './utils/stripe-elements';
 
 const BASE_URL = requireEnv('BASE_URL');
 
@@ -21,55 +23,12 @@ let disposableEmail: string;
 
 /** Logs in with the disposable account from `beforeAll` and lands on /company. */
 async function loginAsDisposableAndGoToCompany(page: Page) {
-  await page.goto(`${BASE_URL}/login`);
-  await page.locator('input[name="username"]').fill(disposableUsername);
-  await page.locator('input[name="password"]').fill(disposablePassword);
-  await page.locator('button[type="submit"]').click();
-  await expect(page).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
-  await page.goto(`${BASE_URL}/company`);
+  await loginAndGoToCompany(page, disposableUsername, disposablePassword);
 }
 
 /** Scopes to the real Payments card on /company, not its hidden mobile-accordion duplicate. */
 function paymentsSummaryCard(page: Page) {
   return page.locator('.MuiCard-root').filter({ has: page.getByRole('link', { name: 'Manage Payments' }) });
-}
-
-/** Resolves an ambiguous `iframe[title="..."]` selector to the one candidate containing `expectedFieldName`, polling until it mounts (see CLAUDE.md's Stripe iframe-swap gotcha). */
-async function resolveStripeFrameByContent(page: Page, iframeTitle: string, expectedFieldName: string, timeoutMs = 15_000) {
-  const deadline = Date.now() + timeoutMs;
-  let lastCandidateCount = 0;
-  while (Date.now() < deadline) {
-    const candidates = page.locator(`iframe[title="${iframeTitle}"]`);
-    lastCandidateCount = await candidates.count();
-    for (let i = 0; i < lastCandidateCount; i++) {
-      const candidate = candidates.nth(i);
-      // A candidate can detach between count() and getAttribute() if Stripe swaps it mid-check.
-      try {
-        if ((await candidate.contentFrame().getByRole('textbox', { name: expectedFieldName }).count()) > 0) {
-          const frameName = await candidate.getAttribute('name');
-          return page.frameLocator(`iframe[name="${frameName}"]`);
-        }
-      } catch {
-        // Fall through to the next poll iteration.
-      }
-    }
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-  throw new Error(
-    `No iframe titled "${iframeTitle}" (out of ${lastCandidateCount} candidate(s)) contained a "${expectedFieldName}" textbox within ${timeoutMs}ms.`
-  );
-}
-
-/** Resolves the Billing Address iframe (probes 'Full name'), also waiting for Address line 1's id to attach (CI-only mount gap, see CLAUDE.md). */
-async function billingAddressFrame(page: Page) {
-  const frame = await resolveStripeFrameByContent(page, 'Secure address input frame', 'Full name');
-  await frame.locator('#billingAddress-addressLine1Input').waitFor({ state: 'attached', timeout: 15_000 });
-  return frame;
-}
-
-/** Resolves the Card CardElement iframe, probing for 'Card number'. */
-async function cardElementFrame(page: Page) {
-  return resolveStripeFrameByContent(page, 'Secure payment input frame', 'Card number');
 }
 
 /** Records requests to the app's own host, excluding Stripe/`_rsc=`/favicon noise, to prove a click fires zero network activity. */

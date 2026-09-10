@@ -5,6 +5,8 @@ import { test, expect, Page, devices } from '@playwright/test';
 import { requireEnv } from './utils/env';
 import { getVerificationLink } from './utils/email';
 import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from './utils/account';
+import { loginAndGoToCompany } from './utils/auth';
+import { getPlanCardState, clickPlanCard, selectPlanAndContinue, cancelSubscriptionAndFinish } from './utils/subscription-ui';
 import {
   stripeFindCustomerByEmail,
   stripeFindSubscription,
@@ -12,6 +14,9 @@ import {
   stripeRequest,
   stripeAttachClockAndAdvanceTo,
 } from './utils/stripe';
+// Suite 7's "Resume Subscription" dialog reuses /payments' own embedded Stripe
+// Elements component, so the same iframe-swap/mounting gotchas apply.
+import { billingAddressFrame, cardElementFrame } from './utils/stripe-elements';
 
 const BASE_URL = requireEnv('BASE_URL');
 
@@ -21,50 +26,7 @@ let disposableEmail: string;
 
 /** Logs in with the disposable account from `beforeAll` and lands on /company. */
 async function loginAsDisposableAndGoToCompany(page: Page) {
-  await page.goto(`${BASE_URL}/login`);
-  await page.locator('input[name="username"]').fill(disposableUsername);
-  await page.locator('input[name="password"]').fill(disposablePassword);
-  await page.locator('button[type="submit"]').click();
-  await expect(page).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
-  await page.goto(`${BASE_URL}/company`);
-}
-
-// --- Stripe iframe helpers, duplicated from tests/payments.spec.ts (per-file-helper convention) ---
-// Needed here because Suite 7's "Resume Subscription" dialog reuses the same
-// embedded Stripe Elements Billing Address/Card component as /payments' own
-// form, so the same iframe-swap/mounting gotchas apply (see CLAUDE.md).
-async function resolveStripeFrameByContent(page: Page, iframeTitle: string, expectedFieldName: string, timeoutMs = 15_000) {
-  const deadline = Date.now() + timeoutMs;
-  let lastCandidateCount = 0;
-  while (Date.now() < deadline) {
-    const candidates = page.locator(`iframe[title="${iframeTitle}"]`);
-    lastCandidateCount = await candidates.count();
-    for (let i = 0; i < lastCandidateCount; i++) {
-      const candidate = candidates.nth(i);
-      try {
-        if ((await candidate.contentFrame().getByRole('textbox', { name: expectedFieldName }).count()) > 0) {
-          const frameName = await candidate.getAttribute('name');
-          return page.frameLocator(`iframe[name="${frameName}"]`);
-        }
-      } catch {
-        // Fall through to the next poll iteration.
-      }
-    }
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-  throw new Error(
-    `No iframe titled "${iframeTitle}" (out of ${lastCandidateCount} candidate(s)) contained a "${expectedFieldName}" textbox within ${timeoutMs}ms.`
-  );
-}
-
-async function billingAddressFrame(page: Page) {
-  const frame = await resolveStripeFrameByContent(page, 'Secure address input frame', 'Full name');
-  await frame.locator('#billingAddress-addressLine1Input').waitFor({ state: 'attached', timeout: 15_000 });
-  return frame;
-}
-
-async function cardElementFrame(page: Page) {
-  return resolveStripeFrameByContent(page, 'Secure payment input frame', 'Card number');
+  await loginAndGoToCompany(page, disposableUsername, disposablePassword);
 }
 
 /** Fills the Resume dialog's Stripe form with real keystrokes + settle pauses (a genuine fix for the iframe-swap gotcha, not padding - see CLAUDE.md), checks 'Save payment details', clicks 'Update Payment Method'. Doesn't wait for any outcome. */
@@ -105,57 +67,6 @@ async function fillAndSubmitResumeDialogPaymentMethod(page: Page, cardNumber: st
   const updateButton = page.getByRole('button', { name: 'Update Payment Method' });
   await expect(updateButton).toBeEnabled();
   await updateButton.click();
-}
-
-/** Re-opens 'Cancel Subscription' and clicks 'Finish Cancellation' - used by 7.3 and by 7.7 to re-establish the same state after 7.6's resume. */
-async function cancelSubscriptionAndFinish(page: Page) {
-  await page.getByRole('button', { name: 'Cancel Subscription', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Cancel Subscription', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Finish Cancellation' }).click();
-  await expect(
-    page.getByText(/^You are currently on the .+ plan\. You will lose these features on .+ unless you resubscribe\.$/)
-  ).toBeVisible();
-}
-
-// --- Plan-card DOM inspection ---
-// The 'selected' state has no ARIA equivalent and MUI's class names are
-// non-deterministic across loads, so this reads the ancestor's computed
-// background-color directly instead (see CLAUDE.md's DOM-inspection pattern for un-role-able state).
-const SELECTED_CARD_BACKGROUND = 'rgba(255, 196, 0, 0.25)';
-
-async function getPlanCardState(page: Page, planName: string): Promise<{ selected: boolean; cursor: string; text: string }> {
-  return page.evaluate(
-    ({ name, selectedBg }) => {
-      const heading = Array.from(document.querySelectorAll('h4')).find((h) => h.textContent === name);
-      if (!heading) throw new Error(`No plan card heading found for "${name}"`);
-      const card = heading.parentElement?.parentElement;
-      if (!card) throw new Error(`Could not find card ancestor for "${name}"`);
-      const style = getComputedStyle(card);
-      return { selected: style.backgroundColor === selectedBg, cursor: style.cursor, text: card.textContent || '' };
-    },
-    { name: planName, selectedBg: SELECTED_CARD_BACKGROUND }
-  );
-}
-
-async function clickPlanCard(page: Page, planName: string) {
-  await page.getByRole('heading', { name: planName, exact: true }).click();
-}
-
-/**
- * Selects a paid plan card and clicks 'Continue' - the shared first step to
- * reach 'Review Purchase' or 'Update Subscription'. Each test redoes this
- * itself since beforeEach resets any in-page selection (see CLAUDE.md's
- * client-state gotcha). Only clicks the card if not already selected -
- * clicking an already-selected card is a real toggle that deselects it.
- */
-async function selectPlanAndContinue(page: Page, planName: string) {
-  const state = await getPlanCardState(page, planName);
-  if (!state.selected) {
-    await clickPlanCard(page, planName);
-  }
-  const continueButton = page.getByRole('button', { name: 'Continue', exact: true });
-  await expect(continueButton).toBeEnabled();
-  await continueButton.click();
 }
 
 // Serial + chromium-only, avoiding parallel-project races (see CLAUDE.md).

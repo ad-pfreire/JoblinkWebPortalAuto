@@ -3,6 +3,7 @@
 
 import { test, expect, Page } from '@playwright/test';
 import { requireEnv } from './utils/env';
+import { loginAndGoToCompany } from './utils/auth';
 
 const BASE_URL = requireEnv('BASE_URL');
 const SEED_USERNAME = requireEnv('TEST_USERNAME');
@@ -10,12 +11,7 @@ const SEED_PASSWORD = requireEnv('TEST_LOGIN_PASSWORD');
 
 /** Logs in as the shared seed account and lands on /company. */
 async function loginAsSeedAndGoToCompany(page: Page) {
-  await page.goto(`${BASE_URL}/login`);
-  await page.locator('input[name="username"]').fill(SEED_USERNAME);
-  await page.locator('input[name="password"]').fill(SEED_PASSWORD);
-  await page.locator('button[type="submit"]').click();
-  await expect(page).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
-  await page.goto(`${BASE_URL}/company`);
+  await loginAndGoToCompany(page, SEED_USERNAME, SEED_PASSWORD);
   await expect(page.getByRole('button', { name: 'Upload' })).toBeVisible();
 }
 
