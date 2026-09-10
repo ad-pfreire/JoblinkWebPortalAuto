@@ -72,15 +72,6 @@ async function cardElementFrame(page: Page) {
   return resolveStripeFrameByContent(page, 'Secure payment input frame', 'Card number');
 }
 
-/** Scopes to the 'Rewards & Balances' card - `.last()` picks the innermost of several nested containing ancestors. */
-function rewardsBalancesCard(page: Page) {
-  return page
-    .locator('div')
-    .filter({ has: page.getByRole('heading', { name: 'Rewards & Balances' }) })
-    .filter({ has: page.getByRole('button', { name: 'Redeem Coupon' }) })
-    .last();
-}
-
 /** Records requests to the app's own host, excluding Stripe/`_rsc=`/favicon noise, to prove a click fires zero network activity. */
 function trackAppRequests(page: Page): string[] {
   const appHostname = new URL(BASE_URL).hostname;
@@ -314,11 +305,6 @@ test.describe('Payments', () => {
       await expect(page.getByRole('heading', { name: 'Current Payment Method', exact: true })).toHaveCount(0);
       await expect(deleteButton).toHaveCount(0);
 
-      const rewardsCard = rewardsBalancesCard(page);
-      await expect(rewardsCard.getByRole('heading', { name: 'Rewards & Balances' })).toBeVisible();
-      await expect(rewardsCard.getByRole('textbox', { name: 'Coupon Code' })).toBeVisible();
-      await expect(rewardsCard.getByRole('button', { name: 'Redeem Coupon' })).toBeVisible();
-
       // Billing Address renders in a Stripe-hosted iframe (AddressElement).
       await expect(page.getByText('Billing Address', { exact: true })).toBeVisible();
       const addressFrame = await billingAddressFrame(page);
@@ -345,9 +331,6 @@ test.describe('Payments', () => {
 
       // Tab title is the bare 'Job Link', unlike /company's 'Company | Job Link'.
       await expect(page).toHaveTitle('Job Link');
-
-      // 2. Only Coupon Code + Redeem Coupon, no balance figure - read via innerText(), not textContent() (see CLAUDE.md).
-      expect(await rewardsCard.innerText()).toBe('Rewards & Balances\nRedeem Coupon');
     });
 
     test("2.2 Country defaults to 'Ecuador' on every fresh page load, with a plain (non-autocomplete) Address field and no State/Province field at that default @real-email", async ({
@@ -455,109 +438,18 @@ test.describe('Payments', () => {
     });
   });
 
-  // Skipped: 'Redeem Coupon' is planned to be wired up in the next release,
-  // at which point these 4 no-op tests need to be rewritten entirely as real
-  // success/error-path coverage (see the TODO on 3.4 below).
-  test.describe.skip('Payments — Rewards & Balances / Coupon Code', () => {
-    test("3.1 Entering a realistic-looking coupon code and clicking 'Redeem Coupon' fires zero network requests and shows no success/error message (expected — feature not yet enabled) @real-email", async ({
+  test.describe('Payments — Rewards & Balances Was Removed (Moved to /subscription)', () => {
+    test("3.1 The old 'Rewards & Balances' / Redeem Coupon card no longer exists on /payments - coupon redemption moved to /subscription's 'Have a Coupon Code?' field, confirmed intentional by the maintainer 2026-09-09 @real-email", async ({
       page,
     }) => {
-      // 1. Type a plausible coupon code and click 'Redeem Coupon' - not wired up yet, so this documents the no-op behavior.
-      // Waits for the page's own create-setup-intent request first, so it
-      // doesn't land inside the tracking window below (not networkidle - this page never goes fully idle).
+      // Confirms the removal stays removed rather than silently reappearing.
+      // See specs/subscription-coupons-test-plan.md for the new location's coverage.
       const setupIntentResponsePromise = page.waitForResponse((response) => response.url().includes('/api/create-setup-intent'));
       await page.goto(`${BASE_URL}/payments`);
       await setupIntentResponsePromise;
-      const rewardsCard = rewardsBalancesCard(page);
-      const couponInput = rewardsCard.getByRole('textbox', { name: 'Coupon Code' });
-      const redeemButton = rewardsCard.getByRole('button', { name: 'Redeem Coupon' });
-
-      const appRequests = trackAppRequests(page);
-      await couponInput.fill('TESTCOUPON123');
-      await redeemButton.click();
-
-      // No success/error response exists to await for a not-yet-wired-up
-      // feature, so a fixed wait gives a hypothetical async request a fair
-      // chance to appear before asserting its absence.
-      await page.waitForTimeout(2000);
-
-      expect(appRequests).toEqual([]);
-
-      // Asserted on TEXT, not count - getByRole('alert') also matches Next.js's route-announcer (see CLAUDE.md).
-      await expect(page.getByRole('alert')).toHaveText('');
-
-      await expect(couponInput).toHaveValue('TESTCOUPON123');
-    });
-
-    test('3.2 A whitespace-only Coupon Code value produces the identical no-op behavior @real-email', async ({ page }) => {
-      // 1. Type only whitespace, then click 'Redeem Coupon' (see 3.1 for the setup-intent wait).
-      const setupIntentResponsePromise = page.waitForResponse((response) => response.url().includes('/api/create-setup-intent'));
-      await page.goto(`${BASE_URL}/payments`);
-      await setupIntentResponsePromise;
-      const rewardsCard = rewardsBalancesCard(page);
-      const couponInput = rewardsCard.getByRole('textbox', { name: 'Coupon Code' });
-      const redeemButton = rewardsCard.getByRole('button', { name: 'Redeem Coupon' });
-
-      const appRequests = trackAppRequests(page);
-      await couponInput.fill('   ');
-      await redeemButton.click();
-      await page.waitForTimeout(2000);
-
-      // Identical to 3.1 - zero network requests, zero visible feedback.
-      expect(appRequests).toEqual([]);
-      await expect(page.getByRole('alert')).toHaveText('');
-    });
-
-    test('3.3 A very long Coupon Code value (128 characters) is accepted with no truncation, and still produces the same no-op behavior on click @real-email', async ({
-      page,
-    }) => {
-      // 1. Type a 128-character repeating string (see 3.1 for the setup-intent wait).
-      const setupIntentResponsePromise = page.waitForResponse((response) => response.url().includes('/api/create-setup-intent'));
-      await page.goto(`${BASE_URL}/payments`);
-      await setupIntentResponsePromise;
-      const rewardsCard = rewardsBalancesCard(page);
-      const couponInput = rewardsCard.getByRole('textbox', { name: 'Coupon Code' });
-      const redeemButton = rewardsCard.getByRole('button', { name: 'Redeem Coupon' });
-
-      const longValue = 'A'.repeat(128);
-      await couponInput.fill(longValue);
-
-      // Accepts the full 128 characters with no truncation or length-limit error.
-      await expect(couponInput).toHaveValue(longValue);
-      expect(await couponInput.inputValue()).toHaveLength(128);
-
-      // 2. Click 'Redeem Coupon' with this long value still in place.
-      const appRequests = trackAppRequests(page);
-      await redeemButton.click();
-      await page.waitForTimeout(2000);
-
-      // Identical to 3.1 - zero network requests, zero visible feedback,
-      // regardless of input length.
-      expect(appRequests).toEqual([]);
-      await expect(page.getByRole('alert')).toHaveText('');
-    });
-
-    test('3.4 KNOWN LIMITATION: Redeem Coupon is not enabled in this release, so its success/error paths cannot be tested yet @real-email', async ({
-      page,
-    }) => {
-      // Consolidation test: the one untouched-field shape not covered by
-      // 3.1-3.3. TODO once enabled: replace this and 3.1-3.3 with real success/error assertions.
-      const setupIntentResponsePromise = page.waitForResponse((response) => response.url().includes('/api/create-setup-intent'));
-      await page.goto(`${BASE_URL}/payments`);
-      await setupIntentResponsePromise;
-      const rewardsCard = rewardsBalancesCard(page);
-      const couponInput = rewardsCard.getByRole('textbox', { name: 'Coupon Code' });
-      const redeemButton = rewardsCard.getByRole('button', { name: 'Redeem Coupon' });
-
-      // Confirm the field is genuinely untouched/empty before clicking.
-      await expect(couponInput).toHaveValue('');
-
-      const appRequests = trackAppRequests(page);
-      await redeemButton.click();
-      await page.waitForTimeout(2000);
-
-      expect(appRequests).toEqual([]);
-      await expect(page.getByRole('alert')).toHaveText('');
+      await expect(page.getByRole('heading', { name: /No Payment Method|Current Payment Method/ })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Rewards & Balances' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Redeem Coupon' })).toHaveCount(0);
     });
   });
 
