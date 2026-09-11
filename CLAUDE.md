@@ -312,6 +312,13 @@ Company Details adds one more wrinkle worth knowing generally: if an area's fiel
 
 ## Portability: multiple people/environments running this suite
 
+**Pointing at another environment** (added 2026-09-11): credentials live one file per environment, picked by `TEST_ENV` — `npm test` reads `.env`, `TEST_ENV=staging npm test` reads `.env.staging`. A missing file **fails immediately** rather than falling back to `.env`, since silently testing the wrong backend is the expensive mistake here (these tests delete real accounts); each run also prints `[env] <file> → <BASE_URL>`. CI sets nothing, so it still reads its injected secrets exactly as before. Every `.env*` is gitignored except `.env.example`.
+
+Two things worth knowing before setting up a new environment:
+
+- **`tests/company/company-details.spec.ts` is the one file that needs its seed account prepared by hand.** It asserts four specific Company Details values (`QA Automation Test Co`, `LIC-123456`, `qa-company-test@crifa.com`, `1725 North Broadway`) *before* the tests that write them, so it fails against a blank company. Seed those four once on the new environment's account. Every other file discovers what it needs at runtime.
+- **Repo secrets are per-repo, not per-environment.** `MONGODB_URI` currently falls back to the older `MONGODB_PRESTAGING_URI` secret name in the workflow. If CI ever needs to run against a second environment, that wants `workflow_dispatch` plus GitHub **Environments** (same variable names, different values per environment) rather than inventing `*_STAGING` secret names.
+
 This suite is designed to work against **any** seed account configured via `TEST_USERNAME`/`TEST_LOGIN_PASSWORD`, not hardcoded to the maintainer's specific account:
 
 - `tests/account/profile-settings.spec.ts` does NOT hardcode expected First Name/Last Name/Phone values. `discoverSeedBaseline()` (called once via `test.beforeAll`) logs in and reads whatever those fields currently are, using that as the "restore point" for the rest of the file. If you add a new spec file that needs a known baseline for some shared-account field, follow this same discover-don't-hardcode pattern rather than writing literal expected values.
