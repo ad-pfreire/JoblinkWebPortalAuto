@@ -7,7 +7,7 @@ import { requireEnv } from './env';
  * Read-only credential — never write through this connection (see CLAUDE.md).
  */
 export async function withMongo<T>(fn: (db: Db) => Promise<T>): Promise<T> {
-  const client = new MongoClient(requireEnv('MONGODB_PRESTAGING_URI'));
+  const client = new MongoClient(requireEnv('MONGODB_URI'));
   try {
     await client.connect();
     return await fn(client.db());

@@ -87,7 +87,12 @@ jobs:
         # 2026-08-27: this exact failure took down "core" for every file,
         # not just this one.
         STRIPE_TEST_RESTRICTED_KEY: ${{ secrets.STRIPE_TEST_RESTRICTED_KEY }}
-        MONGODB_PRESTAGING_URI: ${{ secrets.MONGODB_PRESTAGING_URI }}
+        # The var was renamed MONGODB_PRESTAGING_URI -> MONGODB_URI on
+        # 2026-09-11 (the old name lies once this points at another
+        # environment). The repo secret is still under the old name, so this
+        # falls back to it. Once a MONGODB_URI secret exists, the fallback
+        # stops being used on its own and the `||` can be dropped.
+        MONGODB_URI: ${{ secrets.MONGODB_URI || secrets.MONGODB_PRESTAGING_URI }}
     - uses: actions/upload-artifact@v4
       if: ${{ !cancelled() }}
       with:
@@ -130,7 +135,7 @@ jobs:
         GMAIL_IMAP_USER: ${{ secrets.GMAIL_IMAP_USER }}
         GMAIL_IMAP_APP_PASSWORD: ${{ secrets.GMAIL_IMAP_APP_PASSWORD }}
         STRIPE_TEST_RESTRICTED_KEY: ${{ secrets.STRIPE_TEST_RESTRICTED_KEY }}
-        MONGODB_PRESTAGING_URI: ${{ secrets.MONGODB_PRESTAGING_URI }}
+        MONGODB_URI: ${{ secrets.MONGODB_URI || secrets.MONGODB_PRESTAGING_URI }}
     - uses: actions/upload-artifact@v4
       if: ${{ !cancelled() }}
       with:

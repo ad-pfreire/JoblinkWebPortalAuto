@@ -64,6 +64,32 @@ When picking up new coverage: use the `playwright-test-planner` agent (or manual
    - `GMAIL_IMAP_USER` / `GMAIL_IMAP_APP_PASSWORD` — a Gmail **App Password** (not your normal Gmail password), generated at https://myaccount.google.com/apppasswords. Used only to read verification/reset emails over IMAP.
    - **`.env` is gitignored and must never be committed.**
 
+### Running against another environment (staging, etc.)
+
+One file per environment, selected with `TEST_ENV` — no editing a single `.env` back and forth:
+
+```bash
+cp .env.example .env.staging    # fill in staging's own values
+TEST_ENV=staging npm test       # reads .env.staging
+npm test                        # no TEST_ENV -> reads .env, unchanged
+```
+
+`TEST_ENV=<name>` reads `.env.<name>`. If that file doesn't exist the run **fails immediately** rather than falling back to `.env`, since silently testing the wrong backend is the expensive mistake here — these tests delete real accounts. On start, the suite prints the file it loaded and the resolved URL:
+
+```
+[env] .env.staging → https://joblink-portal.staging.example.com
+```
+
+Every `.env*` file is gitignored except `.env.example`.
+
+**Checklist for a new environment:**
+
+1. `cp .env.example .env.<name>` and fill in **that environment's own** values — its `BASE_URL`, its seed account, and its Stripe/Mongo credentials if they differ. Nothing is shared between files.
+2. The Gmail IMAP values can usually stay the same, since the suite generates a unique `+alias` per run against one real inbox.
+3. Create that environment's seed account, then set `TEST_USERNAME`/`TEST_LOGIN_PASSWORD` to it.
+4. **Seed the Company Details card once, by hand**, on that account: Company Name `QA Automation Test Co`, Contractor License `LIC-123456`, Email `qa-company-test@crifa.com`, Address `1725 North Broadway`. `tests/company/company-details.spec.ts` is the one file that asserts those exact values before writing them, so it fails on a blank company until they exist. Every other file discovers what it needs at runtime.
+5. Run `TEST_ENV=<name> npx playwright test --grep-invert @real-email` first — it's the fastest signal and touches no real email.
+
 ### If you're a second person picking this up: use your own seed account
 
 `TEST_USERNAME`/`TEST_LOGIN_PASSWORD` don't have to point at the maintainer's `pfautomation` account — the suite discovers that account's current name/phone/etc. at runtime rather than assuming fixed values (see `discoverSeedBaseline()` in `tests/account/profile-settings.spec.ts`), so it works against **any** seed account's existing state, sight unseen.

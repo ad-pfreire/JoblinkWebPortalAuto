@@ -16,7 +16,7 @@ import { getPlanCardState, selectPlanAndContinue, cancelSubscriptionAndFinish } 
 import { billingAddressFrame, cardElementFrame } from '../utils/stripe-elements';
 
 const BASE_URL = requireEnv('BASE_URL');
-const MONGO_URI = requireEnv('MONGODB_PRESTAGING_URI');
+const MONGO_URI = requireEnv('MONGODB_URI');
 
 let disposableUsername: string;
 let disposablePassword: string;

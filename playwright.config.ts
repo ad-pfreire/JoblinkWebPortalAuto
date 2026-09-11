@@ -1,12 +1,39 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * Read environment variables from file.
- * https://github.com/motdotla/dotenv
+ * Loads credentials for ONE environment (https://github.com/motdotla/dotenv).
+ *
+ * `TEST_ENV` picks the file: unset reads `.env`, `TEST_ENV=staging` reads
+ * `.env.staging`, and so on. That keeps one file per environment instead of
+ * editing a single one back and forth, which is how you end up running a
+ * destructive test against the wrong backend.
+ *
+ * In CI nothing is set, so this finds no file and falls through to the real
+ * environment variables injected from GitHub secrets - unchanged behavior.
  */
 import dotenv from 'dotenv';
+import fs from 'fs';
 import path from 'path';
-dotenv.config({ path: path.resolve(__dirname, '.env') });
+
+const testEnv = process.env.TEST_ENV;
+const envFile = testEnv ? `.env.${testEnv}` : '.env';
+const envPath = path.resolve(__dirname, envFile);
+
+if (testEnv && !fs.existsSync(envPath)) {
+  throw new Error(
+    `TEST_ENV="${testEnv}" was set, but ${envFile} does not exist.\n` +
+      `Create it (copy .env.example) or unset TEST_ENV to use .env.\n` +
+      `Failing here on purpose: silently falling back would run the suite against the wrong environment.`
+  );
+}
+
+dotenv.config({ path: envPath });
+
+// Echo which backend is about to be hit. The single most expensive mistake
+// here is running against the wrong one, and these tests delete real accounts.
+if (!process.env.CI && process.env.BASE_URL) {
+  console.log(`[env] ${envFile} → ${process.env.BASE_URL}`);
+}
 
 /**
  * See https://playwright.dev/docs/test-configuration.

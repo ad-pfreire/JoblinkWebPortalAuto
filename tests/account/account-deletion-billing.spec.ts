@@ -18,7 +18,7 @@ import { cancelSubscriptionAndFinish } from '../utils/subscription-ui';
 
 const BASE_URL = requireEnv('BASE_URL');
 const REGISTER_PASSWORD = requireEnv('TEST_REGISTER_PASSWORD');
-const MONGO_URI = requireEnv('MONGODB_PRESTAGING_URI');
+const MONGO_URI = requireEnv('MONGODB_URI');
 
 // This file's CI-only Chromium software-rendering flags (see CLAUDE.md) live in its own dedicated project in playwright.config.ts, not a file-level test.use() here.
 
