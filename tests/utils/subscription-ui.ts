@@ -1,9 +1,7 @@
 import { Page, expect } from '@playwright/test';
 
-// The 'selected' state has no ARIA equivalent and MUI's class names are
-// non-deterministic across loads, so plan-card state is read from the
-// ancestor's computed background-color instead (see CLAUDE.md's
-// DOM-inspection pattern for un-role-able state).
+// Read by computed background-color because 'selected' has no ARIA equivalent
+// and MUI's class names change between loads.
 const SELECTED_CARD_BACKGROUND = 'rgba(255, 196, 0, 0.25)';
 
 export async function getPlanCardState(page: Page, planName: string): Promise<{ selected: boolean; cursor: string; text: string }> {
@@ -25,14 +23,12 @@ export async function clickPlanCard(page: Page, planName: string) {
 }
 
 /**
- * Selects a paid plan card and clicks 'Continue' - the shared first step to
- * reach 'Review Purchase' or 'Update Subscription'. Only clicks the card if it
- * is not already selected: clicking an already-selected card is a real toggle
- * that deselects it.
+ * Selects a plan and clicks 'Continue' - the first step toward 'Review
+ * Purchase' or 'Update Subscription'.
  *
- * Always click the target plan's own card at least once per fresh page load,
- * even when it is already the current plan - 'Continue' can look enabled and
- * click cleanly while its handler does nothing otherwise (see CLAUDE.md).
+ * Skips the click when the card is already selected, since clicking it again
+ * toggles it OFF. But some card must be clicked at least once per page load:
+ * otherwise 'Continue' looks enabled, clicks fine, and silently does nothing.
  */
 export async function selectPlanAndContinue(page: Page, planName: string) {
   const state = await getPlanCardState(page, planName);

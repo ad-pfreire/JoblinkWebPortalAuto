@@ -1,13 +1,11 @@
 import { Page, Locator } from '@playwright/test';
 
 /**
- * Clears a field via real Backspace keystrokes rather than `fill('')`.
+ * Clears a field with real Backspace keystrokes.
  *
- * Two separate reasons, both live-verified (see CLAUDE.md): a form library's
- * validation can fire differently for a one-shot `fill()` than for real
- * per-character clearing, and `fill()` on some fields has been observed to
- * fail to clear the existing value at all, appending instead of replacing -
- * which once corrupted the real shared seed account in CI.
+ * Never use `fill('')` for this: it has been caught appending instead of
+ * replacing (which corrupted the real seed account in CI), and validation can
+ * fire differently for a one-shot fill than for per-character clearing.
  */
 export async function clearFieldWithBackspace(page: Page, field: Locator) {
   await field.click();

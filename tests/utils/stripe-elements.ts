@@ -1,19 +1,14 @@
 import { Page, FrameLocator } from '@playwright/test';
 
 /**
- * Resolves an ambiguous `iframe[title="..."]` selector to the one candidate
- * containing `expectedFieldName`, polling until it mounts.
+ * Finds the one real `iframe[title="..."]` by looking inside each candidate for
+ * `expectedFieldName`, then anchors to that iframe's own `name`.
  *
- * Resolving by CONTENT rather than by attribute or DOM order is load-bearing:
- * Stripe can mount several iframes sharing the exact same title (a hidden
- * autocomplete accessory frame, or Link's own WebAuthn frame), and the real
- * interactive frame can be SWAPPED for a new instance mid-test. The returned
- * FrameLocator is rebuilt from the resolved candidate's own `name` attribute,
- * which is stable for that mounted instance's lifetime, unlike a title-based
- * or `.nth()` selector that Playwright re-evaluates on every later action.
- * See CLAUDE.md's Stripe iframe-swap gotcha for the full investigation.
+ * Stripe mounts decoy iframes sharing the exact same title, and can swap the
+ * real one mid-test - so neither the title nor `.nth()` stays valid, but the
+ * resolved `name` does. Polls because the iframes mount after `goto()` resolves.
  *
- * @throws If no candidate contains the expected field within `timeoutMs`.
+ * @throws If no candidate holds the expected field within `timeoutMs`.
  */
 export async function resolveStripeFrameByContent(
   page: Page,
@@ -28,14 +23,14 @@ export async function resolveStripeFrameByContent(
     lastCandidateCount = await candidates.count();
     for (let i = 0; i < lastCandidateCount; i++) {
       const candidate = candidates.nth(i);
-      // A candidate can detach between count() and getAttribute() if Stripe swaps it mid-check.
+      // A swap mid-check detaches the candidate - just try the next one.
       try {
         if ((await candidate.contentFrame().getByRole('textbox', { name: expectedFieldName }).count()) > 0) {
           const frameName = await candidate.getAttribute('name');
           return page.frameLocator(`iframe[name="${frameName}"]`);
         }
       } catch {
-        // Fall through to the next poll iteration.
+        continue;
       }
     }
     await new Promise((resolve) => setTimeout(resolve, 200));
@@ -46,9 +41,8 @@ export async function resolveStripeFrameByContent(
 }
 
 /**
- * Resolves the Billing Address iframe (probes 'Full name'), also waiting for
- * Address line 1's id to attach - the sentinel field mounting does NOT mean
- * the rest of the widget has (a CI-only gap, see CLAUDE.md).
+ * The Billing Address iframe, waiting for Address line 1 too - 'Full name'
+ * being present does not mean the rest of the widget has mounted (CI-only gap).
  */
 export async function billingAddressFrame(page: Page): Promise<FrameLocator> {
   const frame = await resolveStripeFrameByContent(page, 'Secure address input frame', 'Full name');
@@ -56,7 +50,7 @@ export async function billingAddressFrame(page: Page): Promise<FrameLocator> {
   return frame;
 }
 
-/** Resolves the Card CardElement iframe, probing for 'Card number'. */
+/** The Card iframe. */
 export async function cardElementFrame(page: Page): Promise<FrameLocator> {
   return resolveStripeFrameByContent(page, 'Secure payment input frame', 'Card number');
 }

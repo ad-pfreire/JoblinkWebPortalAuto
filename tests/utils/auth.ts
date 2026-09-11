@@ -4,11 +4,10 @@ import { requireEnv } from './env';
 const BASE_URL = requireEnv('BASE_URL');
 
 /**
- * Logs in through the real login form and waits for the post-login landing.
+ * Logs in and waits for the landing page.
  *
- * The landing URL is matched as `/company` OR `/teams/list` on purpose: which
- * one the app picks varies by account state, so pinning either one alone makes
- * the helper fail for the other kind of account.
+ * Accepts `/company` OR `/teams/list`: the app picks one based on account
+ * state, so pinning either alone breaks for the other kind of account.
  */
 export async function login(page: Page, username: string, password: string): Promise<void> {
   await page.goto(`${BASE_URL}/login`);
@@ -18,7 +17,7 @@ export async function login(page: Page, username: string, password: string): Pro
   await expect(page).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
 }
 
-/** Logs in, then navigates to /company regardless of which page login landed on. */
+/** Logs in and lands on /company, whichever page login itself landed on. */
 export async function loginAndGoToCompany(page: Page, username: string, password: string): Promise<void> {
   await login(page, username, password);
   await page.goto(`${BASE_URL}/company`);
