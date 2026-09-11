@@ -1,4 +1,4 @@
-// spec: specs/account-deletion-billing-test-plan.md
+// spec: specs/account-plans/account-deletion-billing-test-plan.md
 // seed: tests/seed.spec.ts
 
 import { test, expect, Page, devices } from '@playwright/test';

@@ -1,4 +1,4 @@
-// spec: specs/payment-history-test-plan.md
+// spec: specs/company-plans/payment-history-test-plan.md
 // seed: tests/seed.spec.ts
 
 import { test, expect, Page, devices, APIResponse } from '@playwright/test';

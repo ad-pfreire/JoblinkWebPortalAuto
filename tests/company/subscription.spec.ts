@@ -1,4 +1,4 @@
-// spec: specs/subscription-test-plan.md
+// spec: specs/company-plans/subscription-test-plan.md
 // seed: tests/seed.spec.ts
 
 import { test, expect, Page, devices } from '@playwright/test';
@@ -753,7 +753,7 @@ test.describe('Subscription', () => {
       // KNOWN ISSUE - intentionally disabled, not a code bug here: this
       // "toggle interval without re-clicking the plan card" interaction
       // remains genuinely inconsistent even with a retry wrapper - likely a
-      // real low-probability app race (see finding 26, specs/subscription-test-plan.md), not fixable from the test side.
+      // real low-probability app race (see finding 26, specs/company-plans/subscription-test-plan.md), not fixable from the test side.
       test.fixme();
       test.slow();
       test.setTimeout(150_000);

@@ -1,3 +1,6 @@
+// spec: specs/account-plans/forgot-password-test-plan.md
+// seed: tests/seed.spec.ts
+
 import { test, expect, Page } from '@playwright/test';
 import { requireEnv } from '../utils/env';
 import { getVerificationLink, getPasswordResetCode } from '../utils/email';

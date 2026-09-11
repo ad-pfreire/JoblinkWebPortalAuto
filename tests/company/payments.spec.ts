@@ -1,4 +1,4 @@
-// spec: specs/payments-test-plan.md
+// spec: specs/company-plans/payments-test-plan.md
 // seed: tests/seed.spec.ts
 
 import { test, expect, Page, devices } from '@playwright/test';
@@ -402,7 +402,7 @@ test.describe('Payments', () => {
       page,
     }) => {
       // Confirms the removal stays removed rather than silently reappearing.
-      // See specs/subscription-coupons-test-plan.md for the new location's coverage.
+      // See specs/company-plans/subscription-coupons-test-plan.md for the new location's coverage.
       const setupIntentResponsePromise = page.waitForResponse((response) => response.url().includes('/api/create-setup-intent'));
       await page.goto(`${BASE_URL}/payments`);
       await setupIntentResponsePromise;

@@ -1,3 +1,6 @@
+// spec: specs/account-plans/login-test-cases.md
+// seed: tests/seed.spec.ts
+
 import { test, expect } from '@playwright/test';
 import { requireEnv } from '../utils/env';
 

@@ -1,4 +1,4 @@
-// spec: specs/logo-upload-test-plan.md
+// spec: specs/company-plans/logo-upload-test-plan.md
 // seed: tests/seed.spec.ts
 
 import { test, expect, Page } from '@playwright/test';

@@ -1,3 +1,6 @@
+// spec: specs/account-plans/profile-settings-test-plan.md
+// seed: tests/seed.spec.ts
+
 import { test, expect, Page, Locator } from '@playwright/test';
 import { requireEnv } from '../utils/env';
 import { login } from '../utils/auth';
@@ -410,7 +413,7 @@ test.describe('Profile Settings', () => {
       await saveButton.click();
       await expect(page.locator('text=Your profile was updated successfully!')).toBeVisible();
 
-      // CORRECTED (differs from specs/profile-settings-test-plan.md section
+      // CORRECTED (differs from specs/account-plans/profile-settings-test-plan.md section
       // 2.6, which claims this trims): the padded value round-trips completely UNCHANGED, neither client- nor server-side.
       await page.goto(`${BASE_URL}/profile`);
       await expect(firstNameInput).toHaveValue(paddedFirstName);
@@ -794,7 +797,7 @@ test.describe('Profile Settings', () => {
       // 2. Re-select "United States" without clearing the digits first.
       await selectPhoneCountry(page, phoneInput, 'United States');
 
-      // CORRECTED (differs from specs/profile-settings-test-plan.md section
+      // CORRECTED (differs from specs/account-plans/profile-settings-test-plan.md section
       // 4.3, which claims the digits carry over reformatted): switching back
       // instead discards them and resets to the bare dial code, same as ordinary country-switch behavior - it does NOT preserve them.
       await expect(countryCodeField).toHaveValue('us');

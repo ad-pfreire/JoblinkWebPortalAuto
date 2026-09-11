@@ -1,4 +1,4 @@
-// spec: specs/teams-plan-gating-test-plan.md
+// spec: specs/teams-plans/teams-plan-gating-test-plan.md
 // seed: tests/seed.spec.ts
 
 import { test, expect, Page, devices } from '@playwright/test';
@@ -386,7 +386,7 @@ async function fillAndSubmitResumeDialogPaymentMethod(page: Page, cardNumber: st
 }
 
 // WEB-TC-128 through 138: the per-member "Subscription Plan" delegation
-// field (see specs/teams-membership-tier-test-plan.md) - its real DOM
+// field (see specs/teams-plans/teams-membership-tier-test-plan.md) - its real DOM
 // structure/id/options were confirmed via a live investigation script first.
 test.describe('Teams — Membership Tier ("Subscription Plan") Delegation', () => {
   test.describe.configure({ mode: 'serial' });
@@ -421,7 +421,7 @@ test.describe('Teams — Membership Tier ("Subscription Plan") Delegation', () =
     await expect(page.getByRole('heading', { name: 'About', exact: true })).toBeVisible({ timeout: 15_000 });
   }
 
-  // Live-verified real id (see specs/teams-membership-tier-test-plan.md) - not the label text, since the label's accessible name changes with the current value (same MUI gotcha as Company Details' State field - see CLAUDE.md).
+  // Live-verified real id (see specs/teams-plans/teams-membership-tier-test-plan.md) - not the label text, since the label's accessible name changes with the current value (same MUI gotcha as Company Details' State field - see CLAUDE.md).
   function tierSelect(page: Page) {
     return page.locator('#mui-component-select-newType');
   }
@@ -519,7 +519,7 @@ test.describe('Teams — Membership Tier ("Subscription Plan") Delegation', () =
       await expect(updateSubscriptionDialogHeading(page)).toBeVisible({ timeout: 10_000 });
       await expect(page.getByText('The full subscription amount will be billed on your next cycle date', { exact: true })).toBeVisible();
 
-      // 3. Real cost preview resolves to 'Order Total' (a net charge, matching the owner's own equivalent dialog - see CLAUDE.md/specs/subscription-test-plan.md) with a real dollar amount, not 'New Account Balance'.
+      // 3. Real cost preview resolves to 'Order Total' (a net charge, matching the owner's own equivalent dialog - see CLAUDE.md/specs/company-plans/subscription-test-plan.md) with a real dollar amount, not 'New Account Balance'.
       await expect(page.getByText('Order Total', { exact: true })).toBeVisible({ timeout: 15_000 });
       await expect(page.getByText('New Account Balance', { exact: true })).toHaveCount(0);
       await expect(page.getByText(/\$\d+\.\d{2}/).first()).toBeVisible();
@@ -850,7 +850,7 @@ test.describe('Teams — Membership Tier Gating on a Trial-Only Owner (Never Pur
         `${memberInfoVisible ? ' with the no-subscription message shown' : ' with no error message shown'}.`
     );
 
-    // Document whichever real outcome occurred - both are legitimate, previously-unknown answers (see specs/teams-membership-tier-test-plan.md Suite 3).
+    // Document whichever real outcome occurred - both are legitimate, previously-unknown answers (see specs/teams-plans/teams-membership-tier-test-plan.md Suite 3).
     if (isDisabled) {
       expect(memberInfoVisible).toBe(true);
     } else {

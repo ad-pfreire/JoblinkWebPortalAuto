@@ -1,4 +1,4 @@
-// spec: specs/teams-multi-account-test-plan.md
+// spec: specs/teams-plans/teams-multi-account-test-plan.md
 // seed: tests/seed.spec.ts
 //
 // Split out of tests/teams.spec.ts: unlike that file's main 'Teams' describe -
