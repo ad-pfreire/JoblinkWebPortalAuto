@@ -16,6 +16,9 @@ bug-triage.md
 /learning/
 
 # Environment variables
+# Covers every per-environment file (.env.staging, .env.prestaging, .env.local,
+# ...) - these hold real credentials and this repo is public. Only the
+# placeholder template is tracked.
 .env
-.env.local
+.env.*
 !.env.example
