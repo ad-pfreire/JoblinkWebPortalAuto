@@ -147,6 +147,19 @@ function logoErrorDialogHeading(page: Page) {
   return page.getByRole('heading', { name: 'Logo Upload', exact: true, level: 5 });
 }
 
+/**
+ * Asserts a file was screened out client-side: no error dialog is raised.
+ *
+ * Needs a real settle window rather than an instant check - "no dialog
+ * appeared" is only meaningful once enough time has passed for one to have
+ * appeared if it were coming (5s, matching the live investigation).
+ */
+async function expectLogoRejectedWithoutDialog(page: Page) {
+  await page.waitForTimeout(5_000);
+  await expect(logoErrorDialogHeading(page)).toBeHidden();
+  await expect(page.getByText(LOGO_ERROR_MESSAGE)).toHaveCount(0);
+}
+
 /** Asserts the generic rejection dialog and dismisses it via 'Continue' - shared by every 3.3 sub-case. */
 async function expectLogoErrorDialogAndDismiss(page: Page) {
   const dialogHeading = logoErrorDialogHeading(page);
@@ -352,19 +365,26 @@ test.describe('Logo Upload', () => {
       await expect(cardImage).toBeVisible();
     });
 
-    // File-type validation moved twice in two days on pre-staging, and this
-    // test (plus 3.4 and 1.1's caption) asserts whichever behavior is live:
-    //   2026-09-10  a deploy added a client-side MIME screen - .txt/.pdf/WEBP
-    //               were dropped before any request, and the caption gained
-    //               "is a JPEG or PNG". Tests were rewritten for it.
-    //   2026-09-11  reverted. Re-verified live, case by case: all four inputs
-    //               below raise the generic dialog again, and a WEBP reaches
-    //               the backend again (see 3.4). Tests restored to this form.
-    // If these fail with "dialog not visible" or a missing POST, check whether
-    // that screen came back before assuming a test-side bug.
-    test("3.3 A non-image file, a fake .pdf, and a byte-corrupted 'image' all fall back to the same generic dimension/size error — the app cannot distinguish 'wrong file type' from 'too small/too large'", async ({
+    test('3.3 A file whose type bypasses the picker is screened out client-side, while a declared-image file that fails to decode still gets the generic dimension/size dialog', async ({
       page,
     }) => {
+      // Asserts the client-side MIME screen, which the app gained on
+      // 2026-09-10. Before it, all four cases below raised the identical
+      // generic dimension/size dialog - the app could not tell "wrong file
+      // type" from "too small/too large". It now can, and rejects the wrong
+      // type before decoding anything or sending any request.
+      //
+      // That screen briefly disappeared on 2026-09-11 (an unrelated deploy
+      // shipped without it) and came back the same day. **A failure here
+      // most likely means it is missing from the environment again, not that
+      // the test is wrong** - re-verify against the app before editing this.
+      // The give-away is 1.1's caption: with the screen it reads "is a JPEG
+      // or PNG, has at least...", without it just "has at least...".
+      //
+      // Every case assigns input.files directly, deliberately bypassing the
+      // input's own accept="image/jpeg,image/png" - a real user is never
+      // offered a .txt/.pdf by the picker at all. This checks the layer
+      // behind that filter, not a user-facing flow.
       const cardImage = logoUploadCard(page).locator('img');
       const previousSrc = await cardImage.getAttribute('src');
 
@@ -375,21 +395,21 @@ test.describe('Logo Upload', () => {
         }
       });
 
-      // 1. Bypass the `accept` filter with a plain-text file - same generic
-      // dialog, consistent with the app decoding pixel dimensions and falling back on failure.
+      // 1-2. MIME types outside the input's own `accept` (image/jpeg,image/png)
+      // are screened out before any decoding or request.
       await injectTextLogoFile(page, 'notes.txt', 'not an image');
-      await expectLogoErrorDialogAndDismiss(page);
+      await expectLogoRejectedWithoutDialog(page);
 
-      // 2. A fake .pdf - identical dialog.
       await injectRawBytesLogoFile(page, { fileName: 'fake-document.pdf', mimeType: 'application/pdf', byteLength: 64 });
-      await expectLogoErrorDialogAndDismiss(page);
+      await expectLogoRejectedWithoutDialog(page);
 
-      // 3. A .png with corrupt byte content - identical dialog, confirming
-      // validation actually decodes the file, not just its extension/MIME type.
+      // 3-4. Files that DO declare an accepted type but cannot be decoded
+      // still reach the dimension check, so the generic dialog appears -
+      // proving the cases above were stopped by the MIME screen specifically,
+      // not by some earlier catch-all that swallows every bad file.
       await injectRawBytesLogoFile(page, { fileName: 'corrupt-logo.png', mimeType: 'image/png', byteLength: 200 });
       await expectLogoErrorDialogAndDismiss(page);
 
-      // 4. A genuine 0-byte .png - identical dialog too.
       await injectRawBytesLogoFile(page, { fileName: 'empty-logo.png', mimeType: 'image/png', byteLength: 0 });
       await expectLogoErrorDialogAndDismiss(page);
 
@@ -398,39 +418,41 @@ test.describe('Logo Upload', () => {
       await expect(cardImage).toHaveAttribute('src', previousSrc!);
     });
 
-    test('3.4 REAL BUG: an unsupported-but-valid image format (WEBP) is silently ignored with ZERO user feedback — no error, no success, no visible change at all', async ({
-      page,
-    }) => {
+    test('3.4 FIXED: a WEBP that bypasses the file picker is now rejected client-side and never reaches the backend', async ({ page }) => {
+      // This test used to document a real defect: a WEBP reached the backend,
+      // which answered 200 with an explicit `"ok":false` / `image/webp`
+      // rejection that the frontend then swallowed, leaving a pointless
+      // round-trip and no handling of the answer.
+      //
+      // A pre-staging deploy on 2026-09-10 fixed it (confirmed with the dev
+      // team): the file's type is now screened client-side, so it is dropped
+      // before any request. Rewritten to assert the fixed behavior.
+      //
+      // Note this path is only reachable by bypassing the picker, as this test
+      // does by assigning input.files directly - the input's own
+      // accept="image/jpeg,image/png" means a real user is never offered a
+      // WEBP in the first place. So the silence here is the last line of
+      // defense behaving correctly, not a user-facing dead end.
       const cardImage = logoUploadCard(page).locator('img');
       const previousSrc = await cardImage.getAttribute('src');
 
-      // 1. Select a valid WEBP image. Intercepts via page.route(), since a
-      // plain waitForResponse().then(r => r.text()) here intermittently throws (see CLAUDE.md).
-      let responseStatus = 0;
-      let responseBody = '';
-      await page.route('**/company', async (route) => {
-        if (route.request().method() !== 'POST') return route.fallback();
-        const response = await route.fetch();
-        responseStatus = response.status();
-        responseBody = await response.text();
-        await route.fulfill({ response });
+      const companyPostRequests: string[] = [];
+      page.on('request', (request) => {
+        if (request.method() === 'POST' && new URL(request.url()).pathname === '/company') {
+          companyPostRequests.push(request.url());
+        }
       });
+
+      // 1. Select a genuinely valid, correctly-encoded WEBP image.
       await injectLogoImageFile(page, { width: 300, height: 300, fileName: 'valid-logo.webp', mimeType: 'image/webp', color: 'teal' });
-      await expect.poll(() => responseStatus).toBe(200);
-      await page.unroute('**/company');
 
-      // CORRECTED: the plan claimed no request is sent for WEBP - a real
-      // POST returns 200 with a body explicitly rejecting it. The bug is
-      // closer to the surface: the frontend gets this rejection but never surfaces it (no dialog/toast at all).
-      expect(responseStatus).toBe(200);
-      expect(responseBody).toContain('"ok":false');
-      expect(responseBody).toContain('image/webp');
-
-      await expect(logoErrorDialogHeading(page)).toBeHidden();
+      // No dialog, no success toast, no request - the file is dropped client-side.
+      await expectLogoRejectedWithoutDialog(page);
       await expect(page.locator('text=Your logo was uploaded successfully')).toBeHidden();
+      expect(companyPostRequests).toHaveLength(0);
       await expect(cardImage).toHaveAttribute('src', previousSrc!);
 
-      // A real user gets zero indication anything happened, despite the backend explicitly explaining why it was rejected.
+      // The saved logo is still intact after a real reload - the rejected file never touched it.
       await page.goto(`${BASE_URL}/company`);
       await expect(cardImage).toHaveAttribute('src', previousSrc!);
     });
