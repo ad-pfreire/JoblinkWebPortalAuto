@@ -79,6 +79,11 @@ export default defineConfig({
     // as chromium-subscription above (this file also does a real Stripe
     // Checkout purchase in its own beforeAll, hitting the identical
     // GPU/hCaptcha issue on GitHub Actions).
+    //
+    // This file lives in tests/teams/ as of 2026-09-11. Every testMatch and
+    // testIgnore here matches against the full path, so a bare filename regex
+    // keeps working from a subfolder - verified, project assignment unchanged.
+    // Only an anchored pattern (e.g. /^tests\/x\.spec\.ts/) would break.
     {
       name: 'chromium-teams-plan-gating',
       testMatch: /teams-plan-gating\.spec\.ts/,

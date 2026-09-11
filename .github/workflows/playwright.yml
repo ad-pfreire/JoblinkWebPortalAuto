@@ -58,7 +58,7 @@ jobs:
     # tests that read an email, but every /forgot-password submission, since
     # that request itself has been confirmed (live, with zero concurrency)
     # to intermittently hang on the real backend, apparently tied to that
-    # same pipeline. Also covers all of tests/payments.spec.ts: none of its
+    # same pipeline. Also covers all of tests/company/payments.spec.ts: none of its
     # individual tests read an email themselves, but its shared
     # beforeAll (registers one disposable account for the whole file) does,
     # so every test in that file is @real-email too - live-verified via a
@@ -77,7 +77,7 @@ jobs:
         TEST_REGISTER_PASSWORD: ${{ secrets.TEST_REGISTER_PASSWORD }}
         GMAIL_IMAP_USER: ${{ secrets.GMAIL_IMAP_USER }}
         GMAIL_IMAP_APP_PASSWORD: ${{ secrets.GMAIL_IMAP_APP_PASSWORD }}
-        # tests/teams-plan-gating.spec.ts reads these at module load time
+        # tests/teams/teams-plan-gating.spec.ts reads these at module load time
         # (requireEnv() calls outside any test), so they must be present
         # here too even though every one of its own tests is tagged
         # @real-email and only actually RUNS in the step below - Playwright

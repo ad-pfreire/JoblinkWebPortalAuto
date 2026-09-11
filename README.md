@@ -14,11 +14,11 @@ Once logged in, the portal has two top-level tabs: **Company** (the landing page
 
 | Area | What's there | Status | Tests |
 |---|---|---|---|
-| **Login** | Username/email + password, validation messages, password visibility toggle, Enter-to-submit, redirect-when-authenticated | ✅ | `tests/login-cases.spec.ts` |
-| **Account Registration** | Register form + validation, email verification (real link over IMAP), Complete Profile (name, phone, tools/market/role dropdowns) | ✅ | `tests/account-registration.spec.ts` |
-| **Forgot / Reset Password** | Email request page, reset-password page (code + new password, strength checklist), real end-to-end reset with a real emailed code | ✅ | `tests/forgot-password.spec.ts` |
-| **Account Deletion** | Profile → "Delete Account" confirmation dialog and real deletion, including its cascade to a real Stripe subscription (active, scheduled-to-cancel, already-lapsed, and different plans) and to MongoDB (including an invited member's own delegated access), plus what happens when a MEMBER rather than the owner deletes themselves | ✅ | `tests/forgot-password.spec.ts`, `tests/account-deletion-billing.spec.ts` |
-| **Profile Settings** (`/profile`) | First/Last name edit + Save, Photo upload/crop, Phone edit, Change Password (modal), Delete Account | ✅ | `tests/profile-settings.spec.ts`, `tests/forgot-password.spec.ts` (real deletion) |
+| **Login** | Username/email + password, validation messages, password visibility toggle, Enter-to-submit, redirect-when-authenticated | ✅ | `tests/account/login-cases.spec.ts` |
+| **Account Registration** | Register form + validation, email verification (real link over IMAP), Complete Profile (name, phone, tools/market/role dropdowns) | ✅ | `tests/account/account-registration.spec.ts` |
+| **Forgot / Reset Password** | Email request page, reset-password page (code + new password, strength checklist), real end-to-end reset with a real emailed code | ✅ | `tests/account/forgot-password.spec.ts` |
+| **Account Deletion** | Profile → "Delete Account" confirmation dialog and real deletion, including its cascade to a real Stripe subscription (active, scheduled-to-cancel, already-lapsed, and different plans) and to MongoDB (including an invited member's own delegated access), plus what happens when a MEMBER rather than the owner deletes themselves | ✅ | `tests/account/forgot-password.spec.ts`, `tests/account/account-deletion-billing.spec.ts` |
+| **Profile Settings** (`/profile`) | First/Last name edit + Save, Photo upload/crop, Phone edit, Change Password (modal), Delete Account | ✅ | `tests/account/profile-settings.spec.ts`, `tests/account/forgot-password.spec.ts` (real deletion) |
 
 ### Company (`/company`) — first tab, the landing page after login
 
@@ -26,21 +26,21 @@ Six cards on one page: Company Details and Logo Upload on their own, then Integr
 
 | Card | What's there | Status | Tests |
 |---|---|---|---|
-| **Company Details** | Read-only view of Company Name, Location, Email, Phone Number, Contractor License, with an "Edit" link (`/company?edit=true`) — the edit form has 13 fields, 8 more than the read view shows | ✅ | `tests/company-details.spec.ts` |
-| **Logo Upload** | "Upload" button; stated limit "at least 150x150 px and no more than 500KB" | ✅ | `tests/logo-upload.spec.ts` |
+| **Company Details** | Read-only view of Company Name, Location, Email, Phone Number, Contractor License, with an "Edit" link (`/company?edit=true`) — the edit form has 13 fields, 8 more than the read view shows | ✅ | `tests/company/company-details.spec.ts` |
+| **Logo Upload** | "Upload" button; stated limit "is a JPEG or PNG, has at least 150x150 px and no more than 500KB" (reworded by a 2026-09-10 deploy that also added a real client-side file-type check, so a non-JPEG/PNG is now rejected before any request — previously a WEBP reached the backend and its rejection was swallowed) | ✅ | `tests/company/logo-upload.spec.ts` |
 | **Integrations** | Lists QuickBooks and Calendar; "Manage integrations" button opens an in-page modal with a Connect/Manage table, a Status column, and a note that only one work-order tool can be linked at a time | ❌ | — |
-| **Payments** (summary card) | Shows "No Payment Method" when unset; "Manage Payments" link goes to the full **`/payments`** page — Stripe-hosted Billing Address + Card form. The old "Rewards & Balances" / "Redeem Coupon" card here was intentionally removed (2026-09-09) — coupon redemption moved to `/subscription`, see below | ✅ | `tests/payments.spec.ts` |
-| **Subscription** (summary card) | Shows current plan name + trial end date; "Manage Subscription" link goes to the full **`/subscription`** page — Free / Job Link Pro / Job Link Pro + Invoicing plan comparison, each listing feature bullets like "Add New Jobs", "Inspection Checklists", "Photos and Notes", "Customer and Equipment History" (marketing copy on the comparison card, not a real in-app "Jobs" section); covers plan selection, Monthly/Yearly toggle, first purchase via real Stripe Checkout, in-app upgrade/downgrade, cancel/resume, and edge cases. A new "Have a Coupon Code?" field also lives here now (plan live-verified in `specs/subscription-coupons-test-plan.md`, but not yet automated — its backend isn't deployed to pre-staging yet, see that file) | ✅ (24/25 — 1 known flaky, see below) | `tests/subscription.spec.ts` |
-| **Payment History** | Table: Status / Date / Title / Amount / Billing ID / Invoice; "No Payment History" placeholder when empty; sortable-*looking* headers that don't actually sort (likely bug); cursor-based pagination; cross-verified against Stripe's own API and real downloaded invoice PDF content | ✅ | `tests/payment-history.spec.ts` |
+| **Payments** (summary card) | Shows "No Payment Method" when unset; "Manage Payments" link goes to the full **`/payments`** page — Stripe-hosted Billing Address + Card form. The old "Rewards & Balances" / "Redeem Coupon" card here was intentionally removed (2026-09-09) — coupon redemption moved to `/subscription`, see below | ✅ | `tests/company/payments.spec.ts` |
+| **Subscription** (summary card) | Shows current plan name + trial end date; "Manage Subscription" link goes to the full **`/subscription`** page — Free / Job Link Pro / Job Link Pro + Invoicing plan comparison, each listing feature bullets like "Add New Jobs", "Inspection Checklists", "Photos and Notes", "Customer and Equipment History" (marketing copy on the comparison card, not a real in-app "Jobs" section); covers plan selection, Monthly/Yearly toggle, first purchase via real Stripe Checkout, in-app upgrade/downgrade, cancel/resume, and edge cases. A new "Have a Coupon Code?" field also lives here now (plan live-verified in `specs/subscription-coupons-test-plan.md`, but not yet automated — its backend isn't deployed to pre-staging yet, see that file) | ✅ (24/25 — 1 known flaky, see below) | `tests/company/subscription.spec.ts` |
+| **Payment History** | Table: Status / Date / Title / Amount / Billing ID / Invoice; "No Payment History" placeholder when empty; sortable-*looking* headers that don't actually sort (likely bug); cursor-based pagination; cross-verified against Stripe's own API and real downloaded invoice PDF content | ✅ | `tests/company/payment-history.spec.ts` |
 
 ### Teams (`/teams`) — second tab
 
 | Area | What's there | Status | Tests |
 |---|---|---|---|
-| **Teams** | Sub-tabs "For you" / "Teams" / "Members", a "Select Teams & People" search box, "+ Create Team" and "Invite Member" buttons, team cards (`/teams/list`) and member list (`/teams/members`), full invite → real email → accept flow | ✅ | `tests/teams.spec.ts` |
-| **Membership Tier delegation** | A member's "About" panel (`/teams/members?member=<id>&cardDetails=true`) has a per-member "Subscription Plan" field an owner on a paid plan uses to grant a member paid-tier access without them paying themselves — enabled/disabled gating (active/trial-only/pending-cancellation/lapsed owner), the upgrade/downgrade confirmation dialog (skeleton, Order Total vs New Account Balance), and the real Stripe/MongoDB effects of confirming | ✅ | `tests/teams-plan-gating.spec.ts` |
+| **Teams** | Sub-tabs "For you" / "Teams" / "Members", a "Select Teams & People" search box, "+ Create Team" and "Invite Member" buttons, team cards (`/teams/list`) and member list (`/teams/members`), full invite → real email → accept flow. Scenarios needing 2–3 real companies at once (a user accepting invitations from two different companies, removal notifications) or a guaranteed-pristine one (team sort order) live in the `-multi-account` file, since each registers its own accounts instead of sharing the main suite's | ✅ | `tests/teams/teams.spec.ts`, `tests/teams/teams-multi-account.spec.ts` |
+| **Membership Tier delegation** | A member's "About" panel (`/teams/members?member=<id>&cardDetails=true`) has a per-member "Subscription Plan" field an owner on a paid plan uses to grant a member paid-tier access without them paying themselves — enabled/disabled gating (active/trial-only/pending-cancellation/lapsed owner), the upgrade/downgrade confirmation dialog (skeleton, Order Total vs New Account Balance), and the real Stripe/MongoDB effects of confirming | ✅ | `tests/teams/teams-plan-gating.spec.ts` |
 
-**Subscription's one known-flaky test**: scenario 8.3 in `tests/subscription.spec.ts` ("toggling Monthly/Yearly alone can leave 'Continue' non-functional until the plan card is explicitly re-clicked") is marked `test.fixme()` — live-verified across 30+ full-suite runs, this specific interaction is genuinely inconsistent even with a 100s retry budget and deliberate settle pauses (the same fix that made the adjacent Resume Subscription tests rock solid). Most likely a low-probability race in the app itself, not something test-side retrying can fully eliminate. See the comment on that test and `specs/subscription-test-plan.md` finding 26 before re-enabling it.
+**Subscription's one known-flaky test**: scenario 8.3 in `tests/company/subscription.spec.ts` ("toggling Monthly/Yearly alone can leave 'Continue' non-functional until the plan card is explicitly re-clicked") is marked `test.fixme()` — live-verified across 30+ full-suite runs, this specific interaction is genuinely inconsistent even with a 100s retry budget and deliberate settle pauses (the same fix that made the adjacent Resume Subscription tests rock solid). Most likely a low-probability race in the app itself, not something test-side retrying can fully eliminate. See the comment on that test and `specs/subscription-test-plan.md` finding 26 before re-enabling it.
 
 When picking up new coverage: use the `playwright-test-planner` agent (or manual exploration) to write a plan in `specs/<area>-test-plan.md` first (see [Test plans](#test-plans-specs), then generate/write the spec file, then flip that row's status here.
 
@@ -66,7 +66,7 @@ When picking up new coverage: use the `playwright-test-planner` agent (or manual
 
 ### If you're a second person picking this up: use your own seed account
 
-`TEST_USERNAME`/`TEST_LOGIN_PASSWORD` don't have to point at the maintainer's `pfautomation` account — the suite discovers that account's current name/phone/etc. at runtime rather than assuming fixed values (see `discoverSeedBaseline()` in `tests/profile-settings.spec.ts`), so it works against **any** seed account's existing state, sight unseen.
+`TEST_USERNAME`/`TEST_LOGIN_PASSWORD` don't have to point at the maintainer's `pfautomation` account — the suite discovers that account's current name/phone/etc. at runtime rather than assuming fixed values (see `discoverSeedBaseline()` in `tests/account/profile-settings.spec.ts`), so it works against **any** seed account's existing state, sight unseen.
 
 What it can't do is coordinate across two different people's machines. `profile-settings.spec.ts` and `logo-upload.spec.ts` mutate their seed account's real state mid-test (name, phone, logo) before restoring it — if two people ran these files against the **same** account credentials at the same time, both from their own laptops, they'd race on that shared state with no way for either side to know the other is running (this is different from the parallel-workers race those files already guard against internally with `mode: 'serial'` + chromium-only, and different from two *CI* runs racing, which the `concurrency` group in `.github/workflows/playwright.yml` already serializes). So: **register your own separate test account** on pre-staging and put its credentials in your own `.env`, rather than reusing someone else's `TEST_USERNAME`. CI's shared secrets are a special case already handled by that `concurrency` group — this only matters for two humans running locally.
 
@@ -82,8 +82,8 @@ npm run report         # open the last HTML report
 
 Run a single file or test by path:
 ```bash
-npx playwright test tests/login-cases.spec.ts
-npx playwright test tests/forgot-password.spec.ts:141
+npx playwright test tests/account/login-cases.spec.ts
+npx playwright test tests/account/forgot-password.spec.ts:141
 ```
 
 Run only the tests that don't depend on real email delivery (what CI's blocking "core" step runs — see [CI](#ci-github-actions)):
@@ -94,25 +94,35 @@ npx playwright test --grep-invert @real-email
 ## Project structure
 
 ```
-tests/
-  login-cases.spec.ts                Login page: valid/invalid login, validation, visibility toggle, etc.
-  account-registration.spec.ts       Registration, email verification, Complete Profile
-  forgot-password.spec.ts            Forgot/reset password, account deletion
-  profile-settings.spec.ts           Profile page: name/phone edit, photo upload, Change Password, delete-cancel
-  logo-upload.spec.ts                Company page Logo Upload card: valid upload/replace, size/dimension validation, error dialog behavior
-  company-details.spec.ts            Company page Company Details card: read view, edit form, validation, save/persistence, cancel/discard
-  payments.spec.ts                   /payments: Stripe-hosted Billing Address + Card form, save/decline/3D Secure flows, replace/delete
-  subscription.spec.ts               /subscription: plan selection, real Stripe Checkout purchase, in-app upgrade/downgrade, cancel/resume
-  teams.spec.ts                      /teams: default team, create/rename/delete, invite member (real email), global search
-  teams-plan-gating.spec.ts          Plan-tier gating after a real Stripe Test Clock time-lapse, cross-checked against MongoDB
-  account-deletion-billing.spec.ts   Account deletion's cascade into a real Stripe subscription and MongoDB
-  payment-history.spec.ts            Company page Payment History table: pagination, sorting (known bug), Stripe/PDF cross-checks
+tests/                               Grouped to mirror the portal's own navigation (see the Coverage Map above)
+  account/                           The user's own account — everything before login, plus /profile
+    login-cases.spec.ts              Login page: valid/invalid login, validation, visibility toggle, etc.
+    account-registration.spec.ts     Registration, email verification, Complete Profile
+    forgot-password.spec.ts          Forgot/reset password, account deletion
+    profile-settings.spec.ts         Profile page: name/phone edit, photo upload, Change Password, delete-cancel
+    account-deletion-billing.spec.ts Account deletion's cascade into a real Stripe subscription and MongoDB
+  company/                           The Company tab (/company) and the pages its cards link out to
+    company-details.spec.ts          Company Details card: read view, edit form, validation, save/persistence, cancel/discard
+    logo-upload.spec.ts              Logo Upload card: valid upload/replace, size/dimension/file-type validation, error dialog
+    payments.spec.ts                 /payments: Stripe-hosted Billing Address + Card form, save/decline/3D Secure flows, replace/delete
+    subscription.spec.ts             /subscription: plan selection, real Stripe Checkout purchase, in-app upgrade/downgrade, cancel/resume
+    payment-history.spec.ts          Payment History table: pagination, sorting (known bug), Stripe/PDF cross-checks
+  teams/                             The Teams tab (/teams)
+    teams.spec.ts                    Default team, create/rename/delete, invite member (real email), global search
+    teams-multi-account.spec.ts      Scenarios needing 2–3 real companies at once, or a pristine one — each test registers
+                                      its own accounts, so it shares no setup with teams.spec.ts
+    teams-plan-gating.spec.ts        Plan-tier gating after a real Stripe Test Clock time-lapse, cross-checked against MongoDB
   seed.spec.ts                       Empty scratch file for one-off manual experiments — not part of the suite
-  utils/
+  utils/                             Shared helpers — import from here rather than re-declaring a local copy in a spec
     env.ts                           requireEnv() — fails fast with a clear message if .env is missing a value
+    auth.ts                          login() / loginAndGoToCompany() — the real login form flow
     account.ts                       Shared account lifecycle helpers (register, complete profile) reused across spec files
     email.ts                         Reads real verification links / reset codes over IMAP
+    forms.ts                         clearFieldWithBackspace() — real keystrokes, never fill('') (see CLAUDE.md)
     stripe.ts                        Plain-fetch() helpers for read-only/test-mode calls against the real Stripe REST API
+    stripe-elements.ts               Resolves Stripe Elements' iframes by content (they multiply and swap — see CLAUDE.md)
+    subscription-ui.ts               /subscription plan cards: select, continue, cancel
+    teams-ui.ts                      teamCard() — matches a team card across its inconsistent link/button role
     mongo.ts                         Read-only helpers for the pre-staging MongoDB (see "Read-only MongoDB access" in CLAUDE.md)
 .github/workflows/
   playwright.yml                     CI: runs the suite on push/PR to main (see "CI" below)
@@ -137,6 +147,8 @@ Every automated area starts as a detailed, live-verified Markdown test plan in `
 
 1. **`Run Playwright tests (core)`** — everything except tests tagged `@real-email`. **This must pass**; a failure here is a real regression.
 2. **`Run Playwright tests (real email, known flaky)`** — every test that submits `/forgot-password` or reads a verification/reset email. It runs with `continue-on-error: true`, so it's visible in the log and as a separate uploaded report (`playwright-report-real-email`), but it **never blocks the "core" step or a PR merge**. Live investigation confirmed (in a fully serial, zero-concurrency run) that the real pre-staging backend intermittently hangs on this specific request — unrelated to the app or test code being wrong — so treating it as blocking would make merges depend on infrastructure outside anyone's control.
+
+That step also carries its own `timeout-minutes`, which is **not** redundant with the job's. `continue-on-error` only covers the step exiting non-zero; it does nothing when the *job* is cancelled for exceeding its cap while that step is still running. Without a step-level cap, a slow real-email run consumed whatever time the job had left and took the whole workflow down with it — red run, and no report artifact either, since the upload's `!cancelled()` guard then skips it. That happened twice on 2026-09-10 with the blocking "core" step already green. The step-level cap makes a slow run fail just that step, which `continue-on-error` then absorbs. The job cap (120m) covers ~8m setup + ~30m core + ~60m real-email with headroom.
 
 Both steps need the real test credentials, read from **GitHub Actions repository secrets** (repo Settings → Secrets and variables → Actions) — same variable names as `.env`: `BASE_URL`, `TEST_EMAIL_USER`, `TEST_EMAIL_DOMAIN`, `TEST_USERNAME`, `TEST_LOGIN_PASSWORD`, `TEST_REGISTER_PASSWORD`, `GMAIL_IMAP_USER`, `GMAIL_IMAP_APP_PASSWORD`. Without these configured, CI fails immediately (the same `requireEnv()` guard used locally).
 
