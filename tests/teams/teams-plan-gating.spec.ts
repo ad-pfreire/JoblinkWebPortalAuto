@@ -3,17 +3,17 @@
 
 import { test, expect, Page, devices } from '@playwright/test';
 import { MongoClient } from 'mongodb';
-import { requireEnv } from './utils/env';
-import { getVerificationLink, getInvitationLink } from './utils/email';
-import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from './utils/account';
-import { login, loginAndGoToCompany } from './utils/auth';
+import { requireEnv } from '../utils/env';
+import { getVerificationLink, getInvitationLink } from '../utils/email';
+import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from '../utils/account';
+import { login, loginAndGoToCompany } from '../utils/auth';
 // Drives a real Stripe Test Clock via the REST API to simulate a subscription
 // genuinely lapsing to Free - no UI interaction can do that within a test run.
-import { stripeRequest, stripeFindCustomerByEmail, stripeFindActiveSubscription, pollTestClockUntilReady } from './utils/stripe';
-import { getPlanCardState, selectPlanAndContinue, cancelSubscriptionAndFinish } from './utils/subscription-ui';
+import { stripeRequest, stripeFindCustomerByEmail, stripeFindActiveSubscription, pollTestClockUntilReady } from '../utils/stripe';
+import { getPlanCardState, selectPlanAndContinue, cancelSubscriptionAndFinish } from '../utils/subscription-ui';
 // Suite 7's "Resume Subscription" dialog reuses /payments' own embedded Stripe
 // Elements component, so the same iframe-swap/mounting gotchas apply.
-import { billingAddressFrame, cardElementFrame } from './utils/stripe-elements';
+import { billingAddressFrame, cardElementFrame } from '../utils/stripe-elements';
 
 const BASE_URL = requireEnv('BASE_URL');
 const MONGO_URI = requireEnv('MONGODB_PRESTAGING_URI');

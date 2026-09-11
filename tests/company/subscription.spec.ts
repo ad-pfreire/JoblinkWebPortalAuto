@@ -2,21 +2,21 @@
 // seed: tests/seed.spec.ts
 
 import { test, expect, Page, devices } from '@playwright/test';
-import { requireEnv } from './utils/env';
-import { getVerificationLink } from './utils/email';
-import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from './utils/account';
-import { loginAndGoToCompany } from './utils/auth';
-import { getPlanCardState, clickPlanCard, selectPlanAndContinue, cancelSubscriptionAndFinish } from './utils/subscription-ui';
+import { requireEnv } from '../utils/env';
+import { getVerificationLink } from '../utils/email';
+import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from '../utils/account';
+import { loginAndGoToCompany } from '../utils/auth';
+import { getPlanCardState, clickPlanCard, selectPlanAndContinue, cancelSubscriptionAndFinish } from '../utils/subscription-ui';
 import {
   stripeFindCustomerByEmail,
   stripeFindSubscription,
   stripeFindActiveSubscription,
   stripeRequest,
   stripeAttachClockAndAdvanceTo,
-} from './utils/stripe';
+} from '../utils/stripe';
 // Suite 7's "Resume Subscription" dialog reuses /payments' own embedded Stripe
 // Elements component, so the same iframe-swap/mounting gotchas apply.
-import { billingAddressFrame, cardElementFrame } from './utils/stripe-elements';
+import { billingAddressFrame, cardElementFrame } from '../utils/stripe-elements';
 
 const BASE_URL = requireEnv('BASE_URL');
 

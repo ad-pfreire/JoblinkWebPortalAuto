@@ -3,18 +3,18 @@
 
 import { test, expect, Page, devices } from '@playwright/test';
 import { MongoClient, ObjectId } from 'mongodb';
-import { requireEnv } from './utils/env';
-import { getVerificationLink, getInvitationLink } from './utils/email';
-import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from './utils/account';
-import { login } from './utils/auth';
+import { requireEnv } from '../utils/env';
+import { getVerificationLink, getInvitationLink } from '../utils/email';
+import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from '../utils/account';
+import { login } from '../utils/auth';
 // stripeFindActiveSubscription is aliased: this file's own former local copy
 // returned currentPeriodEnd (what the Test Clock advance needs), which is the
 // shared *Active* variant - not utils/stripe.ts's same-named stripeFindSubscription.
-import { stripeRequest, stripeFindCustomerByEmail, stripeFindActiveSubscription as stripeFindSubscription } from './utils/stripe';
+import { stripeRequest, stripeFindCustomerByEmail, stripeFindActiveSubscription as stripeFindSubscription } from '../utils/stripe';
 // Only cancelSubscriptionAndFinish is shared: this file's own selectPlanAndContinue
 // deliberately always clicks the card (it only ever runs on fresh accounts where
 // nothing is selected), which is not the shared version's semantics.
-import { cancelSubscriptionAndFinish } from './utils/subscription-ui';
+import { cancelSubscriptionAndFinish } from '../utils/subscription-ui';
 
 const BASE_URL = requireEnv('BASE_URL');
 const REGISTER_PASSWORD = requireEnv('TEST_REGISTER_PASSWORD');

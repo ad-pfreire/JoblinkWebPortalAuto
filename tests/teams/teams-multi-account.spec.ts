@@ -1,4 +1,4 @@
-// spec: specs/teams-test-plan.md
+// spec: specs/teams-multi-account-test-plan.md
 // seed: tests/seed.spec.ts
 //
 // Split out of tests/teams.spec.ts: unlike that file's main 'Teams' describe -
@@ -8,10 +8,10 @@
 // cross-test ordering, and cost nothing extra by living in their own file.
 
 import { test, expect, devices } from '@playwright/test';
-import { requireEnv } from './utils/env';
-import { getVerificationLink, getInvitationLink, checkForAnyEmail } from './utils/email';
-import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from './utils/account';
-import { teamCard } from './utils/teams-ui';
+import { requireEnv } from '../utils/env';
+import { getVerificationLink, getInvitationLink, checkForAnyEmail } from '../utils/email';
+import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from '../utils/account';
+import { teamCard } from '../utils/teams-ui';
 
 const BASE_URL = requireEnv('BASE_URL');
 

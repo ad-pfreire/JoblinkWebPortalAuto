@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { requireEnv } from './utils/env';
+import { requireEnv } from '../utils/env';
 
 // App base URL and test account credentials, loaded from .env.
 const BASE_URL = requireEnv('BASE_URL');

@@ -2,9 +2,9 @@
 // seed: tests/seed.spec.ts
 
 import { test, expect, Page } from '@playwright/test';
-import { requireEnv } from './utils/env';
-import { clearFieldWithBackspace } from './utils/forms';
-import { loginAndGoToCompany } from './utils/auth';
+import { requireEnv } from '../utils/env';
+import { clearFieldWithBackspace } from '../utils/forms';
+import { loginAndGoToCompany } from '../utils/auth';
 
 const BASE_URL = requireEnv('BASE_URL');
 const SEED_USERNAME = requireEnv('TEST_USERNAME');

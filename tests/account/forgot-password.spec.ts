@@ -1,7 +1,7 @@
 import { test, expect, Page } from '@playwright/test';
-import { requireEnv } from './utils/env';
-import { getVerificationLink, getPasswordResetCode } from './utils/email';
-import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from './utils/account';
+import { requireEnv } from '../utils/env';
+import { getVerificationLink, getPasswordResetCode } from '../utils/email';
+import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from '../utils/account';
 
 const BASE_URL = requireEnv('BASE_URL');
 const REGISTERED_EMAIL = `${requireEnv('TEST_EMAIL_USER')}+automation${requireEnv('TEST_EMAIL_DOMAIN')}`;

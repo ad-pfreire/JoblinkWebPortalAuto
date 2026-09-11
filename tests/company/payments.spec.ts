@@ -2,18 +2,18 @@
 // seed: tests/seed.spec.ts
 
 import { test, expect, Page, devices } from '@playwright/test';
-import { requireEnv } from './utils/env';
-import { getVerificationLink } from './utils/email';
-import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from './utils/account';
-import { loginAndGoToCompany } from './utils/auth';
+import { requireEnv } from '../utils/env';
+import { getVerificationLink } from '../utils/email';
+import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from '../utils/account';
+import { loginAndGoToCompany } from '../utils/auth';
 import {
   stripeFindCustomerByEmail,
   stripeListCardPaymentMethods,
   stripeFindActiveSubscription,
   stripeRequest,
   stripeAttachClockAndAdvanceTo,
-} from './utils/stripe';
-import { billingAddressFrame, cardElementFrame } from './utils/stripe-elements';
+} from '../utils/stripe';
+import { billingAddressFrame, cardElementFrame } from '../utils/stripe-elements';
 
 const BASE_URL = requireEnv('BASE_URL');
 

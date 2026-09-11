@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { requireEnv } from './utils/env';
-import { getVerificationLink } from './utils/email';
+import { requireEnv } from '../utils/env';
+import { getVerificationLink } from '../utils/email';
 import {
   TEST_ALIAS_PREFIX,
   generateEmailAlias,
@@ -8,7 +8,7 @@ import {
   generateUsernameFromEmail,
   registerNewAccount,
   completeProfile,
-} from './utils/account';
+} from '../utils/account';
 
 const BASE_URL = requireEnv('BASE_URL');
 const BASE_EMAIL = requireEnv('TEST_EMAIL_USER');

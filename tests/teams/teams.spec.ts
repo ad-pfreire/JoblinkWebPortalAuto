@@ -2,12 +2,12 @@
 // seed: tests/seed.spec.ts
 
 import { test, expect, Page, devices } from '@playwright/test';
-import { requireEnv } from './utils/env';
-import { clearFieldWithBackspace } from './utils/forms';
-import { getVerificationLink, getInvitationLink } from './utils/email';
-import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from './utils/account';
-import { loginAndGoToCompany } from './utils/auth';
-import { teamCard } from './utils/teams-ui';
+import { requireEnv } from '../utils/env';
+import { clearFieldWithBackspace } from '../utils/forms';
+import { getVerificationLink, getInvitationLink } from '../utils/email';
+import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from '../utils/account';
+import { loginAndGoToCompany } from '../utils/auth';
+import { teamCard } from '../utils/teams-ui';
 
 const BASE_URL = requireEnv('BASE_URL');
 

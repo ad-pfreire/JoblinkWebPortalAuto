@@ -1,7 +1,7 @@
 import { test, expect, Page, Locator } from '@playwright/test';
-import { requireEnv } from './utils/env';
-import { login } from './utils/auth';
-import { getVerificationLink } from './utils/email';
+import { requireEnv } from '../utils/env';
+import { login } from '../utils/auth';
+import { getVerificationLink } from '../utils/email';
 import {
   generateUniqueEmailAlias,
   generateUsernameFromEmail,
@@ -9,7 +9,7 @@ import {
   completeProfile,
   selectPhoneCountry,
   setPhoneNumber,
-} from './utils/account';
+} from '../utils/account';
 
 const BASE_URL = requireEnv('BASE_URL');
 const SEED_USERNAME = requireEnv('TEST_USERNAME');

@@ -3,12 +3,12 @@
 
 import { test, expect, Page, devices, APIResponse } from '@playwright/test';
 import { PDFParse } from 'pdf-parse';
-import { requireEnv } from './utils/env';
-import { getVerificationLink } from './utils/email';
-import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from './utils/account';
-import { loginAndGoToCompany } from './utils/auth';
-import { stripeRequest, stripeFindCustomerByEmail } from './utils/stripe';
-import { getUserByEmail, findAnyCollectionReferencing } from './utils/mongo';
+import { requireEnv } from '../utils/env';
+import { getVerificationLink } from '../utils/email';
+import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from '../utils/account';
+import { loginAndGoToCompany } from '../utils/auth';
+import { stripeRequest, stripeFindCustomerByEmail } from '../utils/stripe';
+import { getUserByEmail, findAnyCollectionReferencing } from '../utils/mongo';
 
 const BASE_URL = requireEnv('BASE_URL');
 const SEED_USERNAME = requireEnv('TEST_USERNAME');
