@@ -6,6 +6,7 @@ import { MongoClient } from 'mongodb';
 import { requireEnv } from '../utils/env';
 import { getVerificationLink, getInvitationLink } from '../utils/email';
 import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from '../utils/account';
+import { registerAndCompleteProfile, purchasePlanViaStripeCheckout, inviteAndAcceptMember } from '../utils/provisioning';
 import { login, loginAndGoToCompany } from '../utils/auth';
 // Drives a real Stripe Test Clock via the REST API to simulate a subscription
 // genuinely lapsing to Free - no UI interaction can do that within a test run.
@@ -88,42 +89,10 @@ async function loginAsDisposableAndGoToCompany(page: Page) {
   await loginAndGoToCompany(page, disposableUsername, disposablePassword);
 }
 
-// Generic login for the second (member) disposable account - every
-// disposable account in this project shares the same TEST_REGISTER_PASSWORD
-// value, so disposablePassword works for both.
-async function loginAs(page: Page, username: string) {
-  await login(page, username, disposablePassword);
-}
-
-// Reuses the exact invite -> real email -> accept pattern already proven in
-// teams.spec.ts test 6.7 and account-deletion-billing.spec.ts.
-async function inviteAndAcceptMember(
-  ownerPage: Page,
-  browser: import('@playwright/test').Browser,
-  memberEmail: string,
-  memberUsernameArg: string
-) {
-  await ownerPage.goto(`${BASE_URL}/teams/members`);
-  await ownerPage.getByRole('button', { name: 'Invite Member' }).click();
-  await expect(ownerPage.getByRole('heading', { name: 'Invite Member' })).toBeVisible();
-  const combobox = ownerPage.getByRole('combobox', { name: 'Add People by Email' });
-  await combobox.click();
-  await combobox.pressSequentially(memberEmail);
-  await ownerPage.keyboard.press('Enter');
-  await ownerPage.getByRole('button', { name: 'Invite' }).click();
-  await expect(ownerPage.getByText('Your invitation(s) have been sent.', { exact: true })).toBeVisible();
-
-  const invitationLink = await getInvitationLink(memberEmail, 240_000);
-
-  const memberContext = await browser.newContext({ ...devices['Desktop Chrome'] });
-  const memberPage = await memberContext.newPage();
-  await loginAs(memberPage, memberUsernameArg);
-  await memberPage.goto(invitationLink);
-  await expect(memberPage.getByText('You’ve been invited!', { exact: true })).toBeVisible();
-  await memberPage.getByTestId('accept-btn').click();
-  await expect(memberPage).toHaveURL(`${BASE_URL}/company`, { timeout: 15_000 });
-  await memberContext.close();
-}
+// The invite -> real email -> accept round trip and the register/purchase
+// steps below live in tests/utils/provisioning.ts, shared with the
+// provisioning script that seeds this file's own Membership Tier accounts
+// (tests/setup/provision-tier-pair.spec.ts).
 
 test.describe('Teams Plan Gating', () => {
   test.describe.configure({ mode: 'serial' });
@@ -142,73 +111,27 @@ test.describe('Teams Plan Gating', () => {
     // Stripe purchase, a real cancellation, and a real Test Clock advance - generous headroom for it all.
     test.setTimeout(1_800_000);
 
-    // newContext() with the device profile, not bare newPage() - see CLAUDE.md's real-email delivery gotcha.
-    const context = await browser.newContext({ ...devices['Desktop Chrome'] });
-    const page = await context.newPage();
-
     const emailAlias = generateUniqueEmailAlias();
-    disposableUsername = generateUsernameFromEmail(emailAlias);
     disposablePassword = requireEnv('TEST_REGISTER_PASSWORD');
-    const registeredAt = new Date();
 
     // 1. Register + verify + complete profile - standard pattern.
-    await registerNewAccount(page, emailAlias);
-    const verificationLink = await getVerificationLink(emailAlias, registeredAt, 900_000);
-    await page.goto(verificationLink);
-    await expect(page).toHaveURL(`${BASE_URL}/login`);
-    await page.locator('input[name="username"]').fill(disposableUsername);
-    await page.locator('input[name="password"]').fill(disposablePassword);
-    await page.locator('button[type="submit"]').click();
-    await expect(page).toHaveURL(`${BASE_URL}/complete-profile`);
-    await completeProfile(page);
-    await expect(page).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
+    const owner = await registerAndCompleteProfile(browser, emailAlias, disposablePassword);
+    const context = owner.context;
+    const page = owner.page;
+    disposableUsername = owner.username;
 
     // 2. Purchase Job Link Pro (Monthly) via real Stripe Checkout (same pattern as subscription.spec.ts test 4.2).
-    await page.goto(`${BASE_URL}/subscription`);
-    await selectPlanAndContinue(page, 'Job Link Pro');
-    await expect(page.getByRole('heading', { name: 'Review Purchase', exact: true })).toBeVisible();
-    await page.getByRole('button', { name: 'Confirm and Pay' }).click();
-    await expect(page).toHaveURL(/checkout\.stripe\.com/, { timeout: 30_000 });
-
-    const emailField = page.getByLabel('Email');
-    if ((await emailField.count()) > 0 && !(await emailField.inputValue())) {
-      await emailField.fill(`${disposableUsername}@example.com`);
-    }
-    await page.getByRole('textbox', { name: 'Card number' }).fill('4242424242424242');
-    await page.getByRole('textbox', { name: 'Expiration' }).fill('12/34');
-    await page.getByRole('textbox', { name: 'CVC' }).fill('123');
-    const cardholderNameField = page.getByRole('textbox', { name: 'Cardholder name' });
-    if ((await cardholderNameField.count()) > 0 && !(await cardholderNameField.inputValue())) {
-      await cardholderNameField.fill('QA Plan Gating Test');
-    }
-    // Deliberately never touches the 'I am an AI agent...' checkbox - see
-    // subscription-test-plan.md overview finding 7 for why.
-    const payButton = page.getByRole('button', { name: /Subscribe|Pay/ });
-    await expect(payButton).toBeVisible();
-    await payButton.click();
-    await expect(page).toHaveURL(/\/subscription\?success=true/, { timeout: 45_000 });
+    await purchasePlanViaStripeCheckout(page, 'Job Link Pro', 'QA Plan Gating Test');
 
     // 2b. While the owner is still genuinely Pro/active, register a second
     // MEMBER account, invite and accept, then capture the member's
     // delegated tier now - the "before" half of extending finding 4 across a real lapse.
-    const memberSetupContext = await browser.newContext({ ...devices['Desktop Chrome'] });
-    const memberSetupPage = await memberSetupContext.newPage();
     const memberEmailAlias = generateUniqueEmailAlias();
-    memberUsername = generateUsernameFromEmail(memberEmailAlias);
-    const memberRegisteredAt = new Date();
-    await registerNewAccount(memberSetupPage, memberEmailAlias);
-    const memberVerificationLink = await getVerificationLink(memberEmailAlias, memberRegisteredAt, 900_000);
-    await memberSetupPage.goto(memberVerificationLink);
-    await expect(memberSetupPage).toHaveURL(`${BASE_URL}/login`);
-    await memberSetupPage.locator('input[name="username"]').fill(memberUsername);
-    await memberSetupPage.locator('input[name="password"]').fill(disposablePassword);
-    await memberSetupPage.locator('button[type="submit"]').click();
-    await expect(memberSetupPage).toHaveURL(`${BASE_URL}/complete-profile`);
-    await completeProfile(memberSetupPage);
-    await expect(memberSetupPage).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
-    await memberSetupContext.close();
+    const member = await registerAndCompleteProfile(browser, memberEmailAlias, disposablePassword);
+    memberUsername = member.username;
+    await member.context.close();
 
-    await inviteAndAcceptMember(page, browser, memberEmailAlias, memberUsername);
+    await inviteAndAcceptMember(page, browser, memberEmailAlias, memberUsername, disposablePassword);
 
     const ownerUserDoc = await getUserByEmail(emailAlias);
     const memberUserDoc = await getUserByEmail(memberEmailAlias);
@@ -391,13 +314,19 @@ async function fillAndSubmitResumeDialogPaymentMethod(page: Page, cardNumber: st
 test.describe('Teams — Membership Tier ("Subscription Plan") Delegation', () => {
   test.describe.configure({ mode: 'serial' });
 
-  // Reuses one disposable owner+member pair already registered and
-  // real-Pro-purchased by an earlier investigation script - avoids a second
-  // full register+purchase+invite/accept round trip.
-  const tierOwnerUsername = 'paulfreireausriz0lbh';
-  const tierOwnerEmail = 'paul.freire+ausriz0lbh@crifa.com';
-  const tierMemberUsername = 'paulfreireausrjrk3jy';
-  const tierMemberEmail = 'paul.freire+ausrjrk3jy@crifa.com';
+  // Reuses one owner+member pair already registered, real-Pro-purchased and
+  // invite/accepted - avoids a second full round trip per run. The defaults
+  // are pre-staging's pair; any other environment sets its own four values in
+  // its .env.<name>, seeded by `npx playwright test --project=provision`
+  // (tests/setup/provision-tier-pair.spec.ts).
+  //
+  // NOTE: Suite 8 genuinely cancels this owner's subscription and attaches a
+  // real Test Clock to it, so a pair only survives ONE complete run of this
+  // suite - re-provision before the next full regression pass.
+  const tierOwnerUsername = process.env.TIER_OWNER_USERNAME || 'paulfreireausriz0lbh';
+  const tierOwnerEmail = process.env.TIER_OWNER_EMAIL || 'paul.freire+ausriz0lbh@crifa.com';
+  const tierMemberUsername = process.env.TIER_MEMBER_USERNAME || 'paulfreireausrjrk3jy';
+  const tierMemberEmail = process.env.TIER_MEMBER_EMAIL || 'paul.freire+ausrjrk3jy@crifa.com';
   let tierPassword: string;
   let tierOwnerMongoId: string;
   let tierMemberMongoId: string;
