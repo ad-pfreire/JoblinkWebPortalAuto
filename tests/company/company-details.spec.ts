@@ -2,13 +2,14 @@
 // seed: tests/seed.spec.ts
 
 import { test, expect, Page } from '@playwright/test';
-import { requireEnv } from '../utils/env';
+import { requireEnv, seedEmail } from '../utils/env';
 import { clearFieldWithBackspace } from '../utils/forms';
 import { loginAndGoToCompany } from '../utils/auth';
 
 const BASE_URL = requireEnv('BASE_URL');
 const SEED_USERNAME = requireEnv('TEST_USERNAME');
 const SEED_PASSWORD = requireEnv('TEST_LOGIN_PASSWORD');
+const SEED_EMAIL = seedEmail();
 
 /** Logs in as the shared seed account and lands on /company. */
 async function loginAsSeedAndGoToCompany(page: Page) {
@@ -657,9 +658,9 @@ test.describe('Company Details', () => {
       const profilePhoneNumber = page.getByRole('textbox', { name: 'Phone Number' });
 
       // Profile's Email Address is unchanged, disabled, and genuinely different from Company Details' own Email.
-      await expect(profileEmail).toHaveValue('paul.freire+automation@crifa.com');
+      await expect(profileEmail).toHaveValue(SEED_EMAIL);
       await expect(profileEmail).toBeDisabled();
-      expect(companyEmail).not.toBe('paul.freire+automation@crifa.com');
+      expect(companyEmail).not.toBe(SEED_EMAIL);
 
       // Same for Phone Number - confirms these are wholly independent,
       // company-scoped fields, safe to edit without risking login identity.
@@ -785,6 +786,10 @@ test.describe('Company Details', () => {
       // the network level (not a server error - the request never completes at all).
       await page.goto(`${BASE_URL}/company?edit=true`);
       const companyName = page.getByRole('textbox', { name: 'Company Name' });
+      // Same hydration wait as 6.3: the field renders empty first, and reading
+      // it too early captures '' as the "original" value, failing the cleanup
+      // check at the end of this test rather than where the mistake happened.
+      await expect(companyName).not.toHaveValue('');
       const originalValue = await companyName.inputValue();
       await companyName.click();
       await companyName.fill('QA Network Loss Test');
@@ -818,6 +823,10 @@ test.describe('Company Details', () => {
       // 1. Dirty the form, then force the real save response to be a 500.
       await page.goto(`${BASE_URL}/company?edit=true`);
       const companyName = page.getByRole('textbox', { name: 'Company Name' });
+      // Wait for the form to hydrate before capturing the restore point: the
+      // field renders empty first, and reading it too early captures '' as the
+      // "original" value, which then fails this test's own cleanup check.
+      await expect(companyName).not.toHaveValue('');
       const originalValue = await companyName.inputValue();
       await companyName.click();
       await companyName.fill('QA Forced 500 Test');

@@ -2,7 +2,7 @@
 // seed: tests/seed.spec.ts
 
 import { test, expect, Page, Locator } from '@playwright/test';
-import { requireEnv } from '../utils/env';
+import { requireEnv, seedEmail } from '../utils/env';
 import { login } from '../utils/auth';
 import { getVerificationLink } from '../utils/email';
 import {
@@ -17,7 +17,7 @@ import {
 const BASE_URL = requireEnv('BASE_URL');
 const SEED_USERNAME = requireEnv('TEST_USERNAME');
 const SEED_PASSWORD = requireEnv('TEST_LOGIN_PASSWORD');
-const SEED_EMAIL = `${requireEnv('TEST_EMAIL_USER')}+automation${requireEnv('TEST_EMAIL_DOMAIN')}`;
+const SEED_EMAIL = seedEmail();
 
 // The seed account's baseline values - discovered live, not hardcoded, so
 // this suite works against any developer/CI's own seed account (see CLAUDE.md's Portability section).
@@ -244,7 +244,11 @@ test.describe('Profile Settings', () => {
       // (the same general "unreliable accessible-name computation"
       // pattern already documented elsewhere in this app - see CLAUDE.md).
       const menu = page.getByRole('menu');
-      await expect(menu.getByText(SEED_FIRST_NAME, { exact: false })).toBeVisible();
+      // The name's own heading, not a loose text match: the menu also renders
+      // the avatar's initials, so a seed account whose first name IS those
+      // initials (staging's 'QA' / 'QA Automation') matches twice and trips
+      // strict mode.
+      await expect(menu.getByRole('heading', { name: SEED_FIRST_NAME })).toBeVisible();
       await expect(menu.getByText(SEED_EMAIL, { exact: true })).toBeVisible();
       const profileItem = page.getByRole('menuitem', { name: 'Profile' });
       const logOutItem = page.getByRole('menuitem', { name: 'Log Out' });

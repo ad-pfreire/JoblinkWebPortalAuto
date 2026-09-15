@@ -299,7 +299,13 @@ test.describe('Payment History', () => {
         await loginAsDisposableAndGoToCompany(page);
         const header = page.getByRole('columnheader', { name: column, exact: true });
         await expect(header).toHaveAttribute('aria-sort', 'none');
+        // Wait for real rows before snapshotting them: the header renders
+        // before the table's own data arrives, and capturing an empty 'before'
+        // makes the post-click comparison fail as if sorting HAD reordered
+        // something (live-verified on staging, where the table loads slower).
+        await expect(paymentHistoryDataRows(page).first()).toBeVisible();
         const before = await paymentHistoryDataRows(page).allTextContents();
+        expect(before.length).toBeGreaterThan(0);
 
         await header.click();
         await expect(header).toHaveAttribute('aria-sort', 'none');
