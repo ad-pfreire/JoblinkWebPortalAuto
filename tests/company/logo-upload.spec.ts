@@ -160,6 +160,37 @@ async function expectLogoRejectedWithoutDialog(page: Page) {
   await expect(page.getByText(LOGO_ERROR_MESSAGE)).toHaveCount(0);
 }
 
+/**
+ * Whether this environment's build screens file TYPE client-side (see 3.3).
+ *
+ * Read from the app itself rather than assumed: the caption names the accepted
+ * formats only when the screen is there. Pre-staging has now shipped it,
+ * dropped it, shipped it again and dropped it again (2026-09-10 through
+ * 09-15), and staging predates it entirely - so the tests below verify
+ * whichever behavior is actually deployed instead of going red on the flip.
+ */
+async function hasClientSideFileTypeScreen(page: Page): Promise<boolean> {
+  return (
+    (await logoUploadCard(page)
+      .getByRole('heading', { name: /is a JPEG or PNG/i })
+      .count()) > 0
+  );
+}
+
+/**
+ * Asserts a wrong-TYPE file was rejected, in whichever way this build rejects
+ * it: silently when the client-side screen is deployed, through the generic
+ * dimension/size dialog when it isn't (the app then can't tell "wrong type"
+ * from "too small", which is the defect that screen was added to fix).
+ */
+async function expectWrongFileTypeRejected(page: Page, screensFileType: boolean) {
+  if (screensFileType) {
+    await expectLogoRejectedWithoutDialog(page);
+  } else {
+    await expectLogoErrorDialogAndDismiss(page);
+  }
+}
+
 /** Asserts the generic rejection dialog and dismisses it via 'Continue' - shared by every 3.3 sub-case. */
 async function expectLogoErrorDialogAndDismiss(page: Page) {
   const dialogHeading = logoErrorDialogHeading(page);
@@ -202,7 +233,9 @@ test.describe('Logo Upload', () => {
       // PNG, has at least...") and reverted to the wording below on
       // 2026-09-11 - see the file-validation note on test 3.3. Matching the
       // two constraints that carry the real meaning survives both.
-      await expect(card.getByRole('heading', { name: /Make sure your logo.*150x150 px and no more than 500KB/ })).toBeVisible();
+      // Case-insensitive on purpose: staging renders "500kb" where pre-staging
+      // renders "500KB" (live-verified 2026-09-11), and the casing carries no meaning.
+      await expect(card.getByRole('heading', { name: /Make sure your logo.*150x150 px and no more than 500KB/i })).toBeVisible();
 
       // A single 'Upload' button - no 'Remove'/'Delete'/'Cancel' in the default state.
       const uploadButton = card.getByRole('button', { name: 'Upload' });
@@ -385,6 +418,12 @@ test.describe('Logo Upload', () => {
       // input's own accept="image/jpeg,image/png" - a real user is never
       // offered a .txt/.pdf by the picker at all. This checks the layer
       // behind that filter, not a user-facing flow.
+      //
+      // Which behavior to expect is read from the app, not assumed - see
+      // hasClientSideFileTypeScreen(). Both branches assert a real, specific
+      // outcome, so neither environment gets a free pass.
+      const screensFileType = await hasClientSideFileTypeScreen(page);
+
       const cardImage = logoUploadCard(page).locator('img');
       const previousSrc = await cardImage.getAttribute('src');
 
@@ -398,10 +437,10 @@ test.describe('Logo Upload', () => {
       // 1-2. MIME types outside the input's own `accept` (image/jpeg,image/png)
       // are screened out before any decoding or request.
       await injectTextLogoFile(page, 'notes.txt', 'not an image');
-      await expectLogoRejectedWithoutDialog(page);
+      await expectWrongFileTypeRejected(page, screensFileType);
 
       await injectRawBytesLogoFile(page, { fileName: 'fake-document.pdf', mimeType: 'application/pdf', byteLength: 64 });
-      await expectLogoRejectedWithoutDialog(page);
+      await expectWrongFileTypeRejected(page, screensFileType);
 
       // 3-4. Files that DO declare an accepted type but cannot be decoded
       // still reach the dimension check, so the generic dialog appears -
@@ -433,6 +472,10 @@ test.describe('Logo Upload', () => {
       // accept="image/jpeg,image/png" means a real user is never offered a
       // WEBP in the first place. So the silence here is the last line of
       // defense behaving correctly, not a user-facing dead end.
+      //
+      // Same detection as 3.3: assert whichever behavior is actually deployed.
+      const screensFileType = await hasClientSideFileTypeScreen(page);
+
       const cardImage = logoUploadCard(page).locator('img');
       const previousSrc = await cardImage.getAttribute('src');
 
@@ -446,10 +489,19 @@ test.describe('Logo Upload', () => {
       // 1. Select a genuinely valid, correctly-encoded WEBP image.
       await injectLogoImageFile(page, { width: 300, height: 300, fileName: 'valid-logo.webp', mimeType: 'image/webp', color: 'teal' });
 
-      // No dialog, no success toast, no request - the file is dropped client-side.
-      await expectLogoRejectedWithoutDialog(page);
-      await expect(page.locator('text=Your logo was uploaded successfully')).toBeHidden();
-      expect(companyPostRequests).toHaveLength(0);
+      if (screensFileType) {
+        // No dialog, no success toast, no request - the file is dropped client-side.
+        await expectLogoRejectedWithoutDialog(page);
+        await expect(page.locator('text=Your logo was uploaded successfully')).toBeHidden();
+        expect(companyPostRequests).toHaveLength(0);
+      } else {
+        // The original defect, still present on a build without the screen:
+        // the WEBP travels to the backend, which rejects it, and the app
+        // swallows that answer - no dialog, no toast, nothing for the user.
+        await expect.poll(() => companyPostRequests.length, { timeout: 20_000 }).toBeGreaterThan(0);
+        await expect(page.locator('text=Your logo was uploaded successfully')).toBeHidden();
+      }
+      // Either way the saved logo is untouched.
       await expect(cardImage).toHaveAttribute('src', previousSrc!);
 
       // The saved logo is still intact after a real reload - the rejected file never touched it.

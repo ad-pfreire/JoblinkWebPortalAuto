@@ -17,6 +17,7 @@ import {
 // Suite 7's "Resume Subscription" dialog reuses /payments' own embedded Stripe
 // Elements component, so the same iframe-swap/mounting gotchas apply.
 import { billingAddressFrame, cardElementFrame } from '../utils/stripe-elements';
+import { teamCard } from '../utils/teams-ui';
 
 const BASE_URL = requireEnv('BASE_URL');
 
@@ -304,11 +305,20 @@ test.describe('Subscription', () => {
       await expect(page.getByRole('heading', { name: 'Subscribe to Job Link Pro' })).toBeVisible();
       await expect(page.getByText('$12.00', { exact: true }).first()).toBeVisible();
       await expect(page.getByText('per month', { exact: true }).first()).toBeVisible();
-      await expect(page.getByRole('link', { name: 'Back to Pre-Staging' })).toBeVisible();
+      // Checkout names this link after the Stripe account's own business name,
+      // which differs per environment ('Back to Pre-Staging' vs staging's own),
+      // so match the part that is actually about this page working.
+      await expect(page.getByRole('link', { name: /^Back to / })).toBeVisible();
 
       // CAUTION: never click the 'I am an AI agent...' checkbox - a real
       // 30-minute tool hang when clicked during exploration. Only asserted present, never clicked.
-      await expect(page.getByText('I am an AI agent acting on behalf of someone else', { exact: false })).toBeVisible();
+      //
+      // Stripe renders it per Stripe ACCOUNT, not per app: staging's Checkout
+      // doesn't show it at all (live-verified 2026-09-14), so asserting it on a
+      // secondary environment would fail on someone else's dashboard setting.
+      if (!process.env.TEST_ENV) {
+        await expect(page.getByText('I am an AI agent acting on behalf of someone else', { exact: false })).toBeVisible();
+      }
     });
 
     test("4.2 Completing Checkout with a valid test card (4242...) redirects back with success text and updates /subscription's own active-plan state @real-email", async ({
@@ -384,11 +394,13 @@ test.describe('Subscription', () => {
 
       // 4. Converting the trial to a real paid subscription (test 4.2)
       // didn't touch this account's team/member data - the default team
-      // created at registration is still exactly as it was. On /teams
-      // (For You), the team card is a real link, not a button like its
-      // /teams/list counterpart - live-verified via a failing run's own DOM snapshot.
+      // created at registration is still exactly as it was. Located through
+      // the shared helper because this card renders as a link OR a button,
+      // even across two loads of the same page (see CLAUDE.md); this
+      // assertion used to pin it to 'link' and failed on staging for that
+      // reason alone.
       await page.goto(`${BASE_URL}/teams`);
-      await expect(page.getByRole('link', { name: 'My Team 1 member QA' })).toBeVisible();
+      await expect(teamCard(page, 'My Team')).toBeVisible();
     });
   });
 

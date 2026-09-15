@@ -2,7 +2,7 @@
 // seed: tests/seed.spec.ts
 
 import { test, expect, Page, Locator } from '@playwright/test';
-import { requireEnv } from '../utils/env';
+import { requireEnv, seedEmail } from '../utils/env';
 import { login } from '../utils/auth';
 import { getVerificationLink } from '../utils/email';
 import {
@@ -17,7 +17,7 @@ import {
 const BASE_URL = requireEnv('BASE_URL');
 const SEED_USERNAME = requireEnv('TEST_USERNAME');
 const SEED_PASSWORD = requireEnv('TEST_LOGIN_PASSWORD');
-const SEED_EMAIL = `${requireEnv('TEST_EMAIL_USER')}+automation${requireEnv('TEST_EMAIL_DOMAIN')}`;
+const SEED_EMAIL = seedEmail();
 
 // The seed account's baseline values - discovered live, not hardcoded, so
 // this suite works against any developer/CI's own seed account (see CLAUDE.md's Portability section).
@@ -244,7 +244,11 @@ test.describe('Profile Settings', () => {
       // (the same general "unreliable accessible-name computation"
       // pattern already documented elsewhere in this app - see CLAUDE.md).
       const menu = page.getByRole('menu');
-      await expect(menu.getByText(SEED_FIRST_NAME, { exact: false })).toBeVisible();
+      // The name's own heading, not a loose text match: the menu also renders
+      // the avatar's initials, so a seed account whose first name IS those
+      // initials (staging's 'QA' / 'QA Automation') matches twice and trips
+      // strict mode.
+      await expect(menu.getByRole('heading', { name: SEED_FIRST_NAME })).toBeVisible();
       await expect(menu.getByText(SEED_EMAIL, { exact: true })).toBeVisible();
       const profileItem = page.getByRole('menuitem', { name: 'Profile' });
       const logOutItem = page.getByRole('menuitem', { name: 'Log Out' });
@@ -791,7 +795,10 @@ test.describe('Profile Settings', () => {
 
       // Notable finding: auto-country-detection reparses the digits,
       // recognizes the leading "55" as Brazil's dial code, and silently switches the country selector with no user interaction with the dropdown.
-      await expect(countryCodeField).toHaveValue('br');
+      // Case-insensitive: a 2026-09-15 pre-staging deploy started returning
+      // this widget's country code uppercased ('BR' where it used to be 'br').
+      // The code itself is what matters here, not its casing.
+      await expect(countryCodeField).toHaveValue(/^br$/i);
       await expect(phoneInput).toHaveValue('+55 (51) 23456-7');
 
       // 2. Re-select "United States" without clearing the digits first.
@@ -800,7 +807,7 @@ test.describe('Profile Settings', () => {
       // CORRECTED (differs from specs/account-plans/profile-settings-test-plan.md section
       // 4.3, which claims the digits carry over reformatted): switching back
       // instead discards them and resets to the bare dial code, same as ordinary country-switch behavior - it does NOT preserve them.
-      await expect(countryCodeField).toHaveValue('us');
+      await expect(countryCodeField).toHaveValue(/^us$/i);
       await expect(phoneInput).toHaveValue('+1 ');
 
       // Cleanup: nothing was ever saved - reloading discards this harmless dirtied-but-unsaved state.

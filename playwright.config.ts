@@ -73,7 +73,21 @@ export default defineConfig({
         /teams-plan-gating\.spec\.ts/,
         /account-deletion-billing\.spec\.ts/,
         /payment-history\.spec\.ts/,
+        /tests\/setup\//,
       ],
+      use: { ...devices['Desktop Chrome'] },
+    },
+
+    // Provisioning scripts, not tests: they create real accounts an
+    // environment needs seeded once (see tests/setup/). Every other project
+    // testIgnores tests/setup/, but a bare `npx playwright test` runs EVERY
+    // project including this one, so each script also self-skips unless
+    // PROVISION is set - that guard, not this project, is what makes an
+    // accidental full run harmless:
+    //   PROVISION=1 TEST_ENV=staging npx playwright test --project=provision
+    {
+      name: 'provision',
+      testMatch: /tests\/setup\//,
       use: { ...devices['Desktop Chrome'] },
     },
 
@@ -154,6 +168,7 @@ export default defineConfig({
         /teams-plan-gating\.spec\.ts/,
         /account-deletion-billing\.spec\.ts/,
         /payment-history\.spec\.ts/,
+        /tests\/setup\//,
       ],
       use: { ...devices['Desktop Firefox'] },
     },
@@ -165,6 +180,7 @@ export default defineConfig({
         /teams-plan-gating\.spec\.ts/,
         /account-deletion-billing\.spec\.ts/,
         /payment-history\.spec\.ts/,
+        /tests\/setup\//,
       ],
       use: { ...devices['Desktop Safari'] },
     },

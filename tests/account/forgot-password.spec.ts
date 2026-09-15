@@ -2,12 +2,12 @@
 // seed: tests/seed.spec.ts
 
 import { test, expect, Page } from '@playwright/test';
-import { requireEnv } from '../utils/env';
+import { requireEnv, seedEmail } from '../utils/env';
 import { getVerificationLink, getPasswordResetCode } from '../utils/email';
 import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from '../utils/account';
 
 const BASE_URL = requireEnv('BASE_URL');
-const REGISTERED_EMAIL = `${requireEnv('TEST_EMAIL_USER')}+automation${requireEnv('TEST_EMAIL_DOMAIN')}`;
+const REGISTERED_EMAIL = seedEmail();
 const INVALID_EMAIL = 'invalid-email';
 /** A fresh, never-registered address per call, so reset-password tests never depend on or collide with REGISTERED_EMAIL's inbox. */
 function generateUnregisteredEmail() {
