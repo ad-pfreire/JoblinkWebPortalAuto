@@ -2,7 +2,7 @@
 // seed: tests/seed.spec.ts
 
 import { test, expect } from '@playwright/test';
-import { requireEnv } from '../utils/env';
+import { requireEnv, seedEmail } from '../utils/env';
 import { getVerificationLink } from '../utils/email';
 import {
   TEST_ALIAS_PREFIX,
@@ -216,7 +216,7 @@ test.describe('Account Registration - server responses', () => {
     // 1. Reuse the permanently-registered seed account's email (the one
     // login-cases.spec.ts and forgot-password.spec.ts already rely on) so
     // this test needs no new account and carries no rate-limit risk.
-    const registeredEmail = `${BASE_EMAIL}+automation${EMAIL_DOMAIN}`;
+    const registeredEmail = seedEmail();
 
     await page.goto(`${BASE_URL}/register`);
     const password = requireEnv('TEST_REGISTER_PASSWORD');
