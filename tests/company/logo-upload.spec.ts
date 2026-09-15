@@ -202,7 +202,9 @@ test.describe('Logo Upload', () => {
       // PNG, has at least...") and reverted to the wording below on
       // 2026-09-11 - see the file-validation note on test 3.3. Matching the
       // two constraints that carry the real meaning survives both.
-      await expect(card.getByRole('heading', { name: /Make sure your logo.*150x150 px and no more than 500KB/ })).toBeVisible();
+      // Case-insensitive on purpose: staging renders "500kb" where pre-staging
+      // renders "500KB" (live-verified 2026-09-11), and the casing carries no meaning.
+      await expect(card.getByRole('heading', { name: /Make sure your logo.*150x150 px and no more than 500KB/i })).toBeVisible();
 
       // A single 'Upload' button - no 'Remove'/'Delete'/'Cancel' in the default state.
       const uploadButton = card.getByRole('button', { name: 'Upload' });
@@ -385,6 +387,20 @@ test.describe('Logo Upload', () => {
       // input's own accept="image/jpeg,image/png" - a real user is never
       // offered a .txt/.pdf by the picker at all. This checks the layer
       // behind that filter, not a user-facing flow.
+      //
+      // On a SECONDARY environment (TEST_ENV set) the screen may simply not be
+      // deployed yet - live-verified 2026-09-11 that staging predates it, its
+      // caption reading "has at least..." exactly as described above. Still a
+      // hard failure on the default environment, so a real regression on
+      // pre-staging/CI is never silently skipped.
+      test.skip(
+        !!process.env.TEST_ENV &&
+          (await logoUploadCard(page)
+            .getByRole('heading', { name: /is a JPEG or PNG/i })
+            .count()) === 0,
+        `${process.env.TEST_ENV} doesn't have the client-side file-type screen this test asserts (its Logo Upload caption doesn't name the accepted formats).`
+      );
+
       const cardImage = logoUploadCard(page).locator('img');
       const previousSrc = await cardImage.getAttribute('src');
 
@@ -433,6 +449,18 @@ test.describe('Logo Upload', () => {
       // accept="image/jpeg,image/png" means a real user is never offered a
       // WEBP in the first place. So the silence here is the last line of
       // defense behaving correctly, not a user-facing dead end.
+      //
+      // Same environment guard as 3.3: a secondary environment may predate
+      // that fix (staging does, live-verified 2026-09-11), while the default
+      // environment still fails hard if the screen ever disappears again.
+      test.skip(
+        !!process.env.TEST_ENV &&
+          (await logoUploadCard(page)
+            .getByRole('heading', { name: /is a JPEG or PNG/i })
+            .count()) === 0,
+        `${process.env.TEST_ENV} predates the client-side file-type screen this test asserts (its Logo Upload caption doesn't name the accepted formats).`
+      );
+
       const cardImage = logoUploadCard(page).locator('img');
       const previousSrc = await cardImage.getAttribute('src');
 
