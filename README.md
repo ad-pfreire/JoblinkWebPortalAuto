@@ -86,9 +86,21 @@ Every `.env*` file is gitignored except `.env.example`.
 
 1. `cp .env.example .env.<name>` and fill in **that environment's own** values — its `BASE_URL`, its seed account, and its Stripe/Mongo credentials if they differ. Nothing is shared between files.
 2. The Gmail IMAP values can usually stay the same, since the suite generates a unique `+alias` per run against one real inbox.
-3. Create that environment's seed account, then set `TEST_USERNAME`/`TEST_LOGIN_PASSWORD` to it.
-4. **Seed the Company Details card once, by hand**, on that account: Company Name `QA Automation Test Co`, Contractor License `LIC-123456`, Email `qa-company-test@crifa.com`, Address `1725 North Broadway`. `tests/company/company-details.spec.ts` is the one file that asserts those exact values before writing them, so it fails on a blank company until they exist. Every other file discovers what it needs at runtime.
-5. Run `TEST_ENV=<name> npx playwright test --grep-invert @real-email` first — it's the fastest signal and touches no real email.
+3. Create that environment's seed account, then set `TEST_USERNAME`/`TEST_LOGIN_PASSWORD` to it. If its email is not `<TEST_EMAIL_USER>+automation<TEST_EMAIL_DOMAIN>`, also set `TEST_SEED_EMAIL` to the real address — several files log in as, or assert, that exact email (staging's account is `pfautomationstg` / `+automationstg`).
+4. **Set that account's profile phone to `+1 (212) 555-0100`** (`/profile` → Phone Number → Save). `company-details.spec.ts` 4.4 asserts that literal value, as the counterpart to the company's own phone.
+5. **Seed the Company Details card once, by hand**, on that account: Company Name `QA Automation Test Co`, Contractor License `LIC-123456`, Email `qa-company-test@crifa.com`, Address `1725 North Broadway` (type `1725 W North Broadway Anaheim` and pick the first Google Places suggestion — it fills City `Santa Barbara County` and Zip `93458`), Address 2 `Suite 100`, State `California` or `Texas`, Mobile Phone Number `+1 (213) 555-1234`, Company Website `https://example.com`. `tests/company/company-details.spec.ts` is the one file that asserts those values before writing them, so it fails on a blank company until they exist. Every other file discovers what it needs at runtime.
+   - **Set Country to `United States` before typing the address.** A fresh company defaults to Ecuador, and the Address field's real Google Places lookup filters by the selected country, so a US address returns no suggestions at all until Country is right — it looks like the Places API is broken when it isn't.
+6. Run `TEST_ENV=<name> npx playwright test --grep-invert @real-email` first — it's the fastest signal and touches no real email.
+
+7. **Provision the Membership Tier pair** for that environment, which `tests/teams/teams-plan-gating.spec.ts` needs:
+
+   ```bash
+   PROVISION=1 TEST_ENV=<name> npx playwright test --project=provision
+   ```
+
+   `PROVISION=1` is required: without it the script skips, so a plain full run can never register accounts or buy a subscription by accident. It registers an owner and a member for real, buys Job Link Pro through real Stripe Checkout, sends and accepts the invitation, then prints four lines (`TIER_OWNER_USERNAME`, `TIER_OWNER_EMAIL`, `TIER_MEMBER_USERNAME`, `TIER_MEMBER_EMAIL`) to paste into that environment's `.env`. Takes 10-20 minutes — it waits on three real emails.
+
+   **That pair is single-use.** Suite 8 cancels the owner's subscription for real, so re-run this before each full regression pass. Unset, those four variables fall back to pre-staging's original pair.
 
 ### If you're a second person picking this up: use your own seed account
 
