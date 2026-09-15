@@ -7,6 +7,64 @@ const VERIFY_LINK_PATTERN = /<a[^>]+href="([^"]+)"[^>]*>\s*Verify your email\s*<
 const RESET_CODE_PATTERN = /\b(\d{6})\b/;
 
 /**
+ * A problem with the email itself (found, but unusable) rather than with the
+ * connection - reported immediately instead of being retried until the budget
+ * runs out, which would hide it behind a generic timeout.
+ */
+class EmailContentError extends Error {}
+
+/**
+ * Builds a fresh IMAP client for one poll.
+ *
+ * The three timeouts are load-bearing, not decoration: without them a hung
+ * connect/greeting never settles, so the polling loops below - which only
+ * check their own deadline BETWEEN iterations - wait forever instead of
+ * failing. Live-verified 2026-09-14 against staging: a provisioning run sat
+ * 25+ minutes on a `getInvitationLink()` whose email had actually been in the
+ * mailbox the whole time, with no browser activity and no error.
+ */
+function createImapClient(): ImapFlow {
+  return new ImapFlow({
+    host: 'imap.gmail.com',
+    port: 993,
+    secure: true,
+    auth: {
+      user: requireEnv('GMAIL_IMAP_USER'),
+      pass: requireEnv('GMAIL_IMAP_APP_PASSWORD'),
+    },
+    logger: false,
+    connectionTimeout: 20_000,
+    greetingTimeout: 15_000,
+    socketTimeout: 45_000,
+  });
+}
+
+/**
+ * Runs one poll against a fresh connection, swallowing connection-level
+ * failures so the caller's loop simply tries again on the next iteration.
+ *
+ * @returns The poll's result, or `null` if the email isn't there yet (or this
+ * attempt failed to reach the mailbox at all).
+ */
+async function pollMailbox<T>(read: (client: ImapFlow) => Promise<T | null>): Promise<T | null> {
+  const client = createImapClient();
+  try {
+    await client.connect();
+    const lock = await client.getMailboxLock('INBOX');
+    try {
+      return await read(client);
+    } finally {
+      lock.release();
+    }
+  } catch (error) {
+    if (error instanceof EmailContentError) throw error;
+    return null;
+  } finally {
+    await client.logout().catch(() => {});
+  }
+}
+
+/**
  * Unwraps a Mandrill click-tracking redirect to the real destination URL.
  *
  * @returns The decoded URL, or the original `href` if it isn't Mandrill-wrapped.
@@ -45,42 +103,24 @@ export async function getVerificationLink(toAddress: string, sentAfter: Date, ti
   void sentAfter;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const client = new ImapFlow({
-      host: 'imap.gmail.com',
-      port: 993,
-      secure: true,
-      auth: {
-        user: requireEnv('GMAIL_IMAP_USER'),
-        pass: requireEnv('GMAIL_IMAP_APP_PASSWORD'),
-      },
-      logger: false,
-    });
-    await client.connect();
-    try {
-      const lock = await client.getMailboxLock('INBOX');
-      try {
-        const uids = await client.search({ to: toAddress, subject: 'Job Link Registration Confirmation' }, { uid: true });
-        if (uids && uids.length > 0) {
-          const latestUid = uids[uids.length - 1];
-          const message = await client.fetchOne(latestUid, { source: true }, { uid: true });
-          // Narrows message.source to Buffer; unreachable in practice since search() already confirmed the uid.
-          if (!message || !message.source) {
-            throw new Error(`Fetched message ${latestUid} for ${toAddress} has no source body.`);
-          }
-          const parsed = await simpleParser(message.source);
-          const html = parsed.html || parsed.textAsHtml || '';
-          const match = html.match(VERIFY_LINK_PATTERN);
-          if (!match) {
-            throw new Error(`Verification email to ${toAddress} found but no "Verify your email" link matched inside it.`);
-          }
-          return resolveRealDestination(match[1].replace(/&amp;/g, '&'));
-        }
-      } finally {
-        lock.release();
+    const link = await pollMailbox(async (client) => {
+      const uids = await client.search({ to: toAddress, subject: 'Job Link Registration Confirmation' }, { uid: true });
+      if (!uids || uids.length === 0) return null;
+      const latestUid = uids[uids.length - 1];
+      const message = await client.fetchOne(latestUid, { source: true }, { uid: true });
+      // Narrows message.source to Buffer; unreachable in practice since search() already confirmed the uid.
+      if (!message || !message.source) {
+        throw new EmailContentError(`Fetched message ${latestUid} for ${toAddress} has no source body.`);
       }
-    } finally {
-      await client.logout();
-    }
+      const parsed = await simpleParser(message.source);
+      const html = parsed.html || parsed.textAsHtml || '';
+      const match = html.match(VERIFY_LINK_PATTERN);
+      if (!match) {
+        throw new EmailContentError(`Verification email to ${toAddress} found but no "Verify your email" link matched inside it.`);
+      }
+      return resolveRealDestination(match[1].replace(/&amp;/g, '&'));
+    });
+    if (link) return link;
     await new Promise((resolve) => setTimeout(resolve, 3000));
   }
   throw new Error(`Timed out waiting for verification email to ${toAddress} after ${timeoutMs}ms.`);
@@ -102,42 +142,24 @@ const INVITATION_LINK_PATTERN = /(https:\/\/[^\s<]+\/invitation\?token=[A-Za-z0-
 export async function getInvitationLink(toAddress: string, timeoutMs = 150000): Promise<string> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const client = new ImapFlow({
-      host: 'imap.gmail.com',
-      port: 993,
-      secure: true,
-      auth: {
-        user: requireEnv('GMAIL_IMAP_USER'),
-        pass: requireEnv('GMAIL_IMAP_APP_PASSWORD'),
-      },
-      logger: false,
-    });
-    await client.connect();
-    try {
-      const lock = await client.getMailboxLock('INBOX');
-      try {
-        const uids = await client.search({ to: toAddress, subject: 'New Invitation!' }, { uid: true });
-        if (uids && uids.length > 0) {
-          const latestUid = uids[uids.length - 1];
-          const message = await client.fetchOne(latestUid, { source: true }, { uid: true });
-          // Narrows message.source to Buffer; unreachable in practice since search() already confirmed the uid.
-          if (!message || !message.source) {
-            throw new Error(`Fetched message ${latestUid} for ${toAddress} has no source body.`);
-          }
-          const parsed = await simpleParser(message.source);
-          const html = parsed.html || parsed.textAsHtml || parsed.text || '';
-          const match = html.match(INVITATION_LINK_PATTERN);
-          if (!match) {
-            throw new Error(`Invitation email to ${toAddress} found but no invitation link matched inside it.`);
-          }
-          return match[1].replace(/\.$/, '').replace(/&amp;/g, '&');
-        }
-      } finally {
-        lock.release();
+    const link = await pollMailbox(async (client) => {
+      const uids = await client.search({ to: toAddress, subject: 'New Invitation!' }, { uid: true });
+      if (!uids || uids.length === 0) return null;
+      const latestUid = uids[uids.length - 1];
+      const message = await client.fetchOne(latestUid, { source: true }, { uid: true });
+      // Narrows message.source to Buffer; unreachable in practice since search() already confirmed the uid.
+      if (!message || !message.source) {
+        throw new EmailContentError(`Fetched message ${latestUid} for ${toAddress} has no source body.`);
       }
-    } finally {
-      await client.logout();
-    }
+      const parsed = await simpleParser(message.source);
+      const html = parsed.html || parsed.textAsHtml || parsed.text || '';
+      const match = html.match(INVITATION_LINK_PATTERN);
+      if (!match) {
+        throw new EmailContentError(`Invitation email to ${toAddress} found but no invitation link matched inside it.`);
+      }
+      return match[1].replace(/\.$/, '').replace(/&amp;/g, '&');
+    });
+    if (link) return link;
     await new Promise((resolve) => setTimeout(resolve, 3000));
   }
   throw new Error(`Timed out waiting for invitation email to ${toAddress} after ${timeoutMs}ms.`);
@@ -155,42 +177,24 @@ export async function getPasswordResetCode(toAddress: string, sentAfter: Date, t
   void sentAfter;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const client = new ImapFlow({
-      host: 'imap.gmail.com',
-      port: 993,
-      secure: true,
-      auth: {
-        user: requireEnv('GMAIL_IMAP_USER'),
-        pass: requireEnv('GMAIL_IMAP_APP_PASSWORD'),
-      },
-      logger: false,
-    });
-    await client.connect();
-    try {
-      const lock = await client.getMailboxLock('INBOX');
-      try {
-        const uids = await client.search({ to: toAddress }, { uid: true });
-        if (uids && uids.length > 0) {
-          const latestUid = uids[uids.length - 1];
-          const message = await client.fetchOne(latestUid, { source: true }, { uid: true });
-          // Narrows message.source to Buffer; unreachable in practice since search() already confirmed the uid.
-          if (!message || !message.source) {
-            throw new Error(`Fetched message ${latestUid} for ${toAddress} has no source body.`);
-          }
-          const parsed = await simpleParser(message.source);
-          const text = parsed.text || parsed.html || '';
-          const match = text.match(RESET_CODE_PATTERN);
-          if (!match) {
-            throw new Error(`Password recovery email to ${toAddress} found but no 6-digit code matched inside it.`);
-          }
-          return match[1];
-        }
-      } finally {
-        lock.release();
+    const code = await pollMailbox(async (client) => {
+      const uids = await client.search({ to: toAddress }, { uid: true });
+      if (!uids || uids.length === 0) return null;
+      const latestUid = uids[uids.length - 1];
+      const message = await client.fetchOne(latestUid, { source: true }, { uid: true });
+      // Narrows message.source to Buffer; unreachable in practice since search() already confirmed the uid.
+      if (!message || !message.source) {
+        throw new EmailContentError(`Fetched message ${latestUid} for ${toAddress} has no source body.`);
       }
-    } finally {
-      await client.logout();
-    }
+      const parsed = await simpleParser(message.source);
+      const text = parsed.text || parsed.html || '';
+      const match = text.match(RESET_CODE_PATTERN);
+      if (!match) {
+        throw new EmailContentError(`Password recovery email to ${toAddress} found but no 6-digit code matched inside it.`);
+      }
+      return match[1];
+    });
+    if (code) return code;
     await new Promise((resolve) => setTimeout(resolve, 3000));
   }
   throw new Error(`Timed out waiting for password recovery email to ${toAddress} after ${timeoutMs}ms.`);
@@ -216,36 +220,20 @@ export async function getPasswordResetCode(toAddress: string, sentAfter: Date, t
 export async function checkForAnyEmail(toAddress: string, sentAfter: Date, timeoutMs = 60000): Promise<string | null> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const client = new ImapFlow({
-      host: 'imap.gmail.com',
-      port: 993,
-      secure: true,
-      auth: {
-        user: requireEnv('GMAIL_IMAP_USER'),
-        pass: requireEnv('GMAIL_IMAP_APP_PASSWORD'),
-      },
-      logger: false,
-    });
-    await client.connect();
-    try {
-      const lock = await client.getMailboxLock('INBOX');
-      try {
-        const uids = await client.search({ to: toAddress }, { uid: true });
-        for (const uid of uids ? [...uids].reverse() : []) {
-          const message = await client.fetchOne(uid, { source: true, envelope: true }, { uid: true });
-          if (!message || !message.source) continue;
-          const envelopeDate = message.envelope?.date;
-          if (envelopeDate && new Date(envelopeDate) > sentAfter) {
-            const parsed = await simpleParser(message.source);
-            return parsed.subject || '(no subject)';
-          }
+    const subject = await pollMailbox(async (client) => {
+      const uids = await client.search({ to: toAddress }, { uid: true });
+      for (const uid of uids ? [...uids].reverse() : []) {
+        const message = await client.fetchOne(uid, { source: true, envelope: true }, { uid: true });
+        if (!message || !message.source) continue;
+        const envelopeDate = message.envelope?.date;
+        if (envelopeDate && new Date(envelopeDate) > sentAfter) {
+          const parsed = await simpleParser(message.source);
+          return parsed.subject || '(no subject)';
         }
-      } finally {
-        lock.release();
       }
-    } finally {
-      await client.logout();
-    }
+      return null;
+    });
+    if (subject) return subject;
     await new Promise((resolve) => setTimeout(resolve, 3000));
   }
   return null;
