@@ -165,7 +165,12 @@ test.describe('Company Details', () => {
       // States'), so tests the still-true behavior: reflects the last-saved value on reload, not a re-rolled default.
       await page.goto(`${BASE_URL}/company?edit=true`);
       const countryCombobox = page.getByRole('combobox', { name: /Country/ });
-      await expect(countryCombobox).toHaveText('United States');
+      // Matches either label: a 2026-09-15 pre-staging deploy renamed this
+      // option to 'United States of America', while staging still says
+      // 'United States'. The assertion is about the saved value surviving a
+      // reload, not about the exact wording of the country list.
+      const US = /^United States( of America)?$/;
+      await expect(countryCombobox).toHaveText(US);
 
       // 1. Change Country without saving.
       await countryCombobox.click();
@@ -174,7 +179,7 @@ test.describe('Company Details', () => {
 
       // 2. Reload (do not Save) - reverts to the last-saved 'United States', confirming it's persisted backend state.
       await page.goto(`${BASE_URL}/company?edit=true`);
-      await expect(page.getByRole('combobox', { name: /Country/ })).toHaveText('United States');
+      await expect(page.getByRole('combobox', { name: /Country/ })).toHaveText(US);
     });
 
     test('2.3 Terms and Conditions textarea is pre-filled with the generic legal boilerplate default', async ({ page }) => {

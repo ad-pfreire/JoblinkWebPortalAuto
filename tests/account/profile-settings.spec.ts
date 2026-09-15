@@ -795,7 +795,10 @@ test.describe('Profile Settings', () => {
 
       // Notable finding: auto-country-detection reparses the digits,
       // recognizes the leading "55" as Brazil's dial code, and silently switches the country selector with no user interaction with the dropdown.
-      await expect(countryCodeField).toHaveValue('br');
+      // Case-insensitive: a 2026-09-15 pre-staging deploy started returning
+      // this widget's country code uppercased ('BR' where it used to be 'br').
+      // The code itself is what matters here, not its casing.
+      await expect(countryCodeField).toHaveValue(/^br$/i);
       await expect(phoneInput).toHaveValue('+55 (51) 23456-7');
 
       // 2. Re-select "United States" without clearing the digits first.
@@ -804,7 +807,7 @@ test.describe('Profile Settings', () => {
       // CORRECTED (differs from specs/account-plans/profile-settings-test-plan.md section
       // 4.3, which claims the digits carry over reformatted): switching back
       // instead discards them and resets to the bare dial code, same as ordinary country-switch behavior - it does NOT preserve them.
-      await expect(countryCodeField).toHaveValue('us');
+      await expect(countryCodeField).toHaveValue(/^us$/i);
       await expect(phoneInput).toHaveValue('+1 ');
 
       // Cleanup: nothing was ever saved - reloading discards this harmless dirtied-but-unsaved state.
