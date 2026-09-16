@@ -36,7 +36,12 @@ test.describe('Login flow', () => {
     await expect(page.getByRole('heading', { name: 'Job Link', exact: true })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Your right-hand man.' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Welcome back! Please login to your account.' })).toBeVisible();
-    await expect(page.getByRole('alert')).toBeEmpty();
+    // Every alert empty rather than "the alert": the page always carries
+    // Next.js's own empty route announcer, and the app has been seen rendering
+    // a second empty alert next to it (company-details 4.1, 2026-09-16), which
+    // trips strict mode on a single-element assertion instead of reporting a
+    // real message.
+    expect((await page.getByRole('alert').allTextContents()).join('').trim()).toBe('');
 
     // 2. Username or Email field, empty by default.
     const usernameInput = page.locator('input[name="username"]');

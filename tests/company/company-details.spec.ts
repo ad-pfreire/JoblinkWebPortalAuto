@@ -395,7 +395,8 @@ test.describe('Company Details', () => {
       // the same "nothing changed yet" gate covered in test 4.5.
       await expect(page).toHaveURL(`${BASE_URL}/company?edit=true`);
       await expect(saveButton).toBeDisabled();
-      await expect(page.getByRole('alert')).toHaveText('');
+      // Every alert empty, not "the alert" - same reason as test 4.1.
+      expect((await page.getByRole('alert').allTextContents()).join('').trim()).toBe('');
       await expect(page.getByText(/error/i)).toHaveCount(0);
 
       // 3. Reload - Company Website reverted to its last valid value
@@ -509,7 +510,15 @@ test.describe('Company Details', () => {
 
       // Unlike Profile Settings/Logo Upload/Change Password, this save shows
       // NO success toast - the silent navigation is the only confirmation.
-      await expect(page.getByRole('alert')).toHaveText('');
+      //
+      // Asserts every alert is empty rather than "the alert" being empty: the
+      // page carries at least Next.js's own always-present, empty route
+      // announcer (see CLAUDE.md), and a second empty alert element appeared
+      // alongside it (live-verified in CI 2026-09-16), which made a
+      // single-element assertion fail on strict mode instead of on any real
+      // message. What matters is that none of them says anything.
+      const alertTexts = await page.getByRole('alert').allTextContents();
+      expect(alertTexts.join('').trim()).toBe('');
       await expect(page.getByText(/updated successfully|uploaded successfully/i)).toHaveCount(0);
 
       const card = companyDetailsCard(page);
