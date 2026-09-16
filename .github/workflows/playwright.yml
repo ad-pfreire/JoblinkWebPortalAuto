@@ -4,6 +4,18 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
+  # Manual runs choose the environment. push/PR are unchanged: they resolve to
+  # pre-staging, whose credentials are the repo-level secrets this workflow has
+  # always used, so nothing about the existing flow moves.
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to run against'
+        type: choice
+        options:
+          - pre-staging
+          - staging
+        default: pre-staging
 # Every run of this workflow, on every branch/PR, hits the SAME shared seed
 # account (TEST_USERNAME/TEST_LOGIN_PASSWORD secrets) - two overlapping runs
 # (e.g. two PRs pushed close together) would race on that one account's
@@ -14,11 +26,19 @@ on:
 # cancel) because killing a run mid-test could skip its own cleanup/restore
 # step (e.g. profile-settings.spec.ts restoring First Name/Phone), leaving
 # the shared account corrupted for whichever run goes next.
+#
+# Keyed by environment: each one has its OWN seed account, so a staging run and
+# a pre-staging run share no state and have no reason to wait for each other.
+# Two runs against the SAME environment still queue, which is the whole point.
 concurrency:
-  group: playwright-suite-seed-account
+  group: playwright-suite-${{ inputs.environment || 'pre-staging' }}
   cancel-in-progress: false
 jobs:
   test:
+    # Picks up that environment's secrets. Anything it doesn't define falls back
+    # to the repo-level secret of the same name, so pre-staging needs no
+    # duplicated values and staging only overrides what genuinely differs.
+    environment: ${{ inputs.environment || 'pre-staging' }}
     # 60 -> 90 -> 120. Each bump followed the same symptom: the job getting
     # hard-killed by this cap ("The job has exceeded the maximum execution
     # time", not a test failure) instead of reaching a pass/fail verdict.
@@ -87,6 +107,14 @@ jobs:
         # 2026-08-27: this exact failure took down "core" for every file,
         # not just this one.
         STRIPE_TEST_RESTRICTED_KEY: ${{ secrets.STRIPE_TEST_RESTRICTED_KEY }}
+        # Both optional: unset (an absent secret resolves to an empty string,
+        # which the code treats as unset) they fall back to pre-staging's own
+        # seed email and Membership Tier pair. Staging sets its own.
+        TEST_SEED_EMAIL: ${{ secrets.TEST_SEED_EMAIL }}
+        TIER_OWNER_USERNAME: ${{ secrets.TIER_OWNER_USERNAME }}
+        TIER_OWNER_EMAIL: ${{ secrets.TIER_OWNER_EMAIL }}
+        TIER_MEMBER_USERNAME: ${{ secrets.TIER_MEMBER_USERNAME }}
+        TIER_MEMBER_EMAIL: ${{ secrets.TIER_MEMBER_EMAIL }}
         # The var was renamed MONGODB_PRESTAGING_URI -> MONGODB_URI on
         # 2026-09-11 (the old name lies once this points at another
         # environment). The repo secret is still under the old name, so this
@@ -135,6 +163,14 @@ jobs:
         GMAIL_IMAP_USER: ${{ secrets.GMAIL_IMAP_USER }}
         GMAIL_IMAP_APP_PASSWORD: ${{ secrets.GMAIL_IMAP_APP_PASSWORD }}
         STRIPE_TEST_RESTRICTED_KEY: ${{ secrets.STRIPE_TEST_RESTRICTED_KEY }}
+        # Both optional: unset (an absent secret resolves to an empty string,
+        # which the code treats as unset) they fall back to pre-staging's own
+        # seed email and Membership Tier pair. Staging sets its own.
+        TEST_SEED_EMAIL: ${{ secrets.TEST_SEED_EMAIL }}
+        TIER_OWNER_USERNAME: ${{ secrets.TIER_OWNER_USERNAME }}
+        TIER_OWNER_EMAIL: ${{ secrets.TIER_OWNER_EMAIL }}
+        TIER_MEMBER_USERNAME: ${{ secrets.TIER_MEMBER_USERNAME }}
+        TIER_MEMBER_EMAIL: ${{ secrets.TIER_MEMBER_EMAIL }}
         MONGODB_URI: ${{ secrets.MONGODB_URI || secrets.MONGODB_PRESTAGING_URI }}
     - uses: actions/upload-artifact@v4
       if: ${{ !cancelled() }}
