@@ -102,6 +102,25 @@ Every `.env*` file is gitignored except `.env.example`.
 
    **That pair is single-use.** Suite 8 cancels the owner's subscription for real, so re-run this before each full regression pass. Unset, those four variables fall back to pre-staging's original pair.
 
+### Running CI against another environment
+
+`push` and `pull_request` always run against pre-staging, unchanged. To run the
+suite against another environment, go to **Actions → Playwright Tests → Run
+workflow**, pick the environment, and start it.
+
+The credentials come from GitHub **Environments** (Settings → Environments), not
+from `*_STAGING` secret names: each environment defines only what differs from
+the repo-level secrets, and anything it leaves out falls through to those. So
+`staging` sets its URL, its seed account, its Stripe key, its Mongo URI and its
+`TIER_*` pair, while Gmail IMAP and `TEST_EMAIL_*` stay shared.
+
+Two things to know before trusting such a run:
+
+- The manual trigger only exists once the workflow is on the default branch.
+- A staging run consumes the Membership Tier pair, exactly like a local one, so
+  its `TIER_*` secrets need refreshing (provision locally, then update them)
+  before a run meant to be conclusive. Those tests never block a merge.
+
 ### If you're a second person picking this up: use your own seed account
 
 `TEST_USERNAME`/`TEST_LOGIN_PASSWORD` don't have to point at the maintainer's `pfautomation` account — the suite discovers that account's current name/phone/etc. at runtime rather than assuming fixed values (see `discoverSeedBaseline()` in `tests/account/profile-settings.spec.ts`), so it works against **any** seed account's existing state, sight unseen.
