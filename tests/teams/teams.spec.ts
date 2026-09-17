@@ -1,9 +1,9 @@
 // spec: specs/teams-plans/teams-test-plan.md
 // seed: tests/seed.spec.ts
 
-import { test, expect, Page, devices } from '@playwright/test';
+import { test, expect, Page, Locator, devices } from '@playwright/test';
 import { requireEnv } from '../utils/env';
-import { clearFieldWithBackspace } from '../utils/forms';
+import { blurAndReadValue, clearFieldWithBackspace } from '../utils/forms';
 import { getVerificationLink, getInvitationLink } from '../utils/email';
 import { generateUniqueEmailAlias, generateUsernameFromEmail, registerNewAccount, completeProfile } from '../utils/account';
 import { loginAndGoToCompany } from '../utils/auth';
@@ -40,6 +40,23 @@ async function loginAsInvitee(page: Page) {
     await page.locator('button[type="submit"]').click();
     await expect(page).toHaveURL(/.*\/(company|teams\/list)$/, { timeout: 15_000 });
   }).toPass({ timeout: 90_000 });
+}
+
+/**
+ * Whether this build strips leading/trailing whitespace out of a name field on blur.
+ *
+ * Probed with a neutral sentinel value rather than inferred from the behavior
+ * under test, so the whitespace tests below still assert something real on both
+ * builds. A 2026-09-17 pre-staging deploy added this trim app-wide and, with it,
+ * fixed the three whitespace defects 2.2/3.2/3.3b were written to document;
+ * staging still runs the older build (see CLAUDE.md). Leaves the field empty.
+ */
+async function nameFieldTrimsOnBlur(page: Page, nameField: Locator, blurTarget: Locator): Promise<boolean> {
+  await clearFieldWithBackspace(page, nameField);
+  await nameField.pressSequentially('  X  ');
+  const settled = await blurAndReadValue(nameField, blurTarget);
+  await clearFieldWithBackspace(page, nameField);
+  return settled === 'X';
 }
 
 /** Opens 'Update Team Name' via the unlabeled edit icon - the only button with an empty accessible name inside `<main>` on a team's detail view. */
@@ -276,7 +293,7 @@ test.describe('Teams', () => {
       await expect(page.getByRole('button', { name: 'Leave Team' })).toHaveCount(0);
     });
 
-    test("2.2 REAL BUG: the 'Update Team Name' modal's Name field accepts a whitespace-only value with the Update button becoming enabled and no validation shown @real-email", async ({
+    test("2.2 The 'Update Team Name' modal's Name field handles a whitespace-only value as its deployed build does - rejected since pre-staging's trim, a REAL BUG that enabled 'Update' before it @real-email", async ({
       page,
     }) => {
       // 1. Open 'Update Team Name', clear the pre-filled 'Name' via real Backspace keystrokes, then blur it.
@@ -290,8 +307,9 @@ test.describe('Teams', () => {
       const updateButton = page.getByRole('button', { name: 'Update' });
       await expect(updateButton).toBeDisabled();
 
-      await clearFieldWithBackspace(page, nameField);
-      await page.getByRole('heading', { name: 'Update Team Name' }).click();
+      const modalHeading = page.getByRole('heading', { name: 'Update Team Name' });
+      const buildTrimsOnBlur = await nameFieldTrimsOnBlur(page, nameField, modalHeading);
+      await modalHeading.click();
 
       await expect(page.getByText('The field is required', { exact: true })).toBeVisible();
       await expect(nameField).toHaveAttribute('aria-invalid', 'true');
@@ -301,9 +319,16 @@ test.describe('Teams', () => {
       await nameField.click();
       await nameField.pressSequentially('   ');
 
-      // REAL BUG: 'Update' becomes ENABLED with only whitespace, no error - the same fill()-vs-keystrokes gap (see CLAUDE.md), confirmed for Team Name too.
-      await expect(updateButton).toBeEnabled();
-      await expect(page.getByText('The field is required', { exact: true })).toBeHidden();
+      if (buildTrimsOnBlur) {
+        // Fixed on pre-staging 2026-09-17: whitespace no longer counts as content,
+        // so 'Update' stays disabled and the required-field error stays up.
+        await expect(updateButton).toBeDisabled();
+        await expect(page.getByText('The field is required', { exact: true })).toBeVisible();
+      } else {
+        // REAL BUG on the older build: 'Update' becomes ENABLED with only whitespace, no error - the same fill()-vs-keystrokes gap (see CLAUDE.md), confirmed for Team Name too.
+        await expect(updateButton).toBeEnabled();
+        await expect(page.getByText('The field is required', { exact: true })).toBeHidden();
+      }
 
       // 3. Click 'Cancel' rather than submitting, to avoid corrupting the default team's name (3.2 already confirms this persists server-side).
       await page.getByRole('button', { name: 'Cancel' }).click();
@@ -490,7 +515,7 @@ test.describe('Teams', () => {
       }).toPass({ timeout: 45_000 });
     });
 
-    test('3.2 REAL BUG: submitting Create Team with a whitespace-only Name is accepted client-side and genuinely PERSISTS a blank-looking team to the backend @real-email', async ({
+    test("3.2 A whitespace-only Team Name is handled as the deployed build handles it - rejected client-side since pre-staging's trim, a REAL BUG that persisted a blank team before it @real-email", async ({
       page,
     }) => {
       // 1. Open 'Create Team', type exactly three spaces into 'Name' via real keystrokes, leave 'Add Teams Members' empty, click 'Create'.
@@ -498,8 +523,28 @@ test.describe('Teams', () => {
       await expect(page.getByRole('heading', { name: 'Teams (1)', exact: true })).toBeVisible();
       await page.getByRole('button', { name: '+ Create Team' }).click();
       const nameField = page.getByRole('textbox', { name: 'Name' });
+      const modalHeading = page.getByRole('heading', { name: 'Create Team' });
+      const buildTrimsOnBlur = await nameFieldTrimsOnBlur(page, nameField, modalHeading);
       await nameField.click();
       await nameField.pressSequentially('   ');
+
+      if (buildTrimsOnBlur) {
+        // Fixed on pre-staging 2026-09-17: 'Create' never enables for whitespace,
+        // so the submission below can't even be attempted, and blurring empties
+        // the field and raises the required-field error instead.
+        await expect(page.getByRole('button', { name: 'Create' })).toBeDisabled();
+        await modalHeading.click();
+        await expect(nameField).toHaveValue('');
+        await expect(page.getByText('The field is required', { exact: true })).toBeVisible();
+        await expect(nameField).toHaveAttribute('aria-invalid', 'true');
+
+        // No team is created, and the modal closes only through its own Cancel.
+        await page.getByRole('button', { name: 'Cancel' }).click();
+        await page.goto(`${BASE_URL}/teams/list`);
+        await expect(page.getByRole('heading', { name: 'Teams (1)', exact: true })).toBeVisible();
+        return;
+      }
+
       await page.getByRole('button', { name: 'Create' }).click();
 
       // REAL BUG: an in-modal success screen appears exactly like a valid
@@ -569,7 +614,7 @@ test.describe('Teams', () => {
       await expect(page.getByRole('heading', { name: 'Teams (1)', exact: true })).toBeVisible();
     });
 
-    test("3.3b REAL BUG: leading/trailing spaces around an otherwise-valid name are NOT trimmed - '  My Team  ' is accepted as a genuinely distinct team, not caught by 3.3's own duplicate guard @real-email", async ({
+    test("3.3b Whether '  My Team  ' escapes 3.3's duplicate guard depends on the deployed build - caught since pre-staging's trim, a REAL BUG that created a second team before it @real-email", async ({
       page,
     }) => {
       // Two stacked toPass() blocks below (30s each, for two DIFFERENT
@@ -578,16 +623,33 @@ test.describe('Teams', () => {
       // 3.1c above, see its own comment for the live-verified failure mode.
       test.setTimeout(90_000);
 
-      // Types '  My Team  ' (real keystrokes, padded on both sides) - unlike
-      // 3.3's exact-match duplicate check, this is NOT trimmed before
-      // comparing, so the app creates a real second team.
+      // Types '  My Team  ' (real keystrokes, padded on both sides) against an
+      // existing 'My Team'. Whether the padding survives to the comparison is
+      // exactly what separates the two builds.
       await page.goto(`${BASE_URL}/teams/list`);
       await page.getByRole('button', { name: '+ Create Team' }).click();
       const nameField = page.getByRole('textbox', { name: 'Name' });
+      const modalHeading = page.getByRole('heading', { name: 'Create Team' });
+      const buildTrimsOnBlur = await nameFieldTrimsOnBlur(page, nameField, modalHeading);
       await nameField.click();
       await nameField.pressSequentially('  My Team  ');
       const createButton = page.getByRole('button', { name: 'Create' });
       await expect(createButton).toBeEnabled();
+
+      if (buildTrimsOnBlur) {
+        // Fixed on pre-staging 2026-09-17: clicking 'Create' blurs the field
+        // first, so what reaches the duplicate check is the trimmed 'My Team'
+        // and 3.3's guard catches it - live-verified, no second team created.
+        await createButton.click();
+        await expect(page.getByText('Team with that name already exists', { exact: true })).toBeVisible();
+        await expect(nameField).toHaveAttribute('aria-invalid', 'true');
+        await expect(createButton).toBeDisabled();
+
+        await page.getByRole('button', { name: 'Cancel' }).click();
+        await page.goto(`${BASE_URL}/teams/list`);
+        await expect(page.getByRole('heading', { name: 'Teams (1)', exact: true })).toBeVisible();
+        return;
+      }
 
       await createButton.click();
       // Generous timeout - same slow-Create-response reasoning as 3.2.

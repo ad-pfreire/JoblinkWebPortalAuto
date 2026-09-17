@@ -3,6 +3,7 @@
 
 import { test, expect } from '@playwright/test';
 import { requireEnv, seedEmail } from '../utils/env';
+import { blurAndReadValue } from '../utils/forms';
 
 // App base URL and test account credentials, loaded from .env.
 const BASE_URL = requireEnv('BASE_URL');
@@ -269,20 +270,36 @@ test.describe('Login flow - additional behaviors', () => {
     await expect(page).toHaveURL(`${BASE_URL}/login`);
   });
 
-  test('should not trim leading/trailing whitespace and should fail login', async ({ page }) => {
+  test('should handle a whitespace-padded username exactly as the deployed build does', async ({ page }) => {
     const usernameInput = page.locator('input[name="username"]');
+    const passwordInput = page.locator('input[name="password"]');
     const paddedUsername = `  ${TEST_USERNAME}  `;
 
-    // 1. Enter a valid username padded with spaces and the correct password.
+    // 1. Enter a valid username padded with spaces. While the field still has
+    // focus both builds keep it exactly as typed (verified 2026-09-17: it was
+    // still padded 3s later on pre-staging, which now trims).
     await usernameInput.fill(paddedUsername);
-    await page.locator('input[name="password"]').fill(PASSWORD);
-
-    // 2. The raw input value keeps the whitespace — it isn't auto-trimmed.
     await expect(usernameInput).toHaveValue(paddedUsername);
 
-    // 3. Submitting fails: the padded value doesn't match the stored username.
+    // 2. Blur it by moving to Password. This is where pre-staging's build now
+    // strips the padding and staging's older build does not, so read the real
+    // value back and hold this build to that outcome's own consequence -
+    // rewriting the test on every deploy is what CLAUDE.md's rule 2 exists to
+    // avoid. (Supersedes the plan's section 10.1, which predates the trim.)
+    const valueAtSubmit = await blurAndReadValue(usernameInput, passwordInput);
+    const buildTrimsOnBlur = valueAtSubmit === TEST_USERNAME;
+    await passwordInput.fill(PASSWORD);
     await page.locator('button[type="submit"]').click();
-    await expect(page.locator('text=Incorrect username or password.')).toBeVisible();
+
+    if (buildTrimsOnBlur) {
+      // The padding is gone before submit, so these are simply the real
+      // credentials and the login has to succeed.
+      await expect(page).toHaveURL(/.*\/(company|teams\/list)$/);
+    } else {
+      // The padded value is sent as-is and doesn't match the stored username.
+      expect(valueAtSubmit).toBe(paddedUsername);
+      await expect(page.locator('text=Incorrect username or password.')).toBeVisible();
+    }
   });
 
   test('should redirect away from /login when already authenticated', async ({ page }) => {

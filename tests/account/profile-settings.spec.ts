@@ -13,6 +13,7 @@ import {
   selectPhoneCountry,
   setPhoneNumber,
 } from '../utils/account';
+import { blurAndReadValue } from '../utils/forms';
 
 const BASE_URL = requireEnv('BASE_URL');
 const SEED_USERNAME = requireEnv('TEST_USERNAME');
@@ -401,49 +402,66 @@ test.describe('Profile Settings', () => {
       expect(await usernameInput.evaluate((el) => (el as HTMLInputElement).readOnly)).toBe(false);
     });
 
-    test('should NOT trim leading/trailing whitespace from First Name even after a save round-trip', async ({ page }) => {
+    test('should round-trip a whitespace-padded First Name exactly as the deployed build handles it', async ({ page }) => {
       const firstNameInput = page.locator('input[name="firstName"]');
+      const lastNameInput = page.locator('input[name="lastName"]');
       const saveButton = page.getByRole('button', { name: 'Save' });
-      const paddedFirstName = '  QA  ';
+      // Pads the seed's OWN name rather than a literal, so the trimmed form is
+      // always exactly the baseline - which is what makes the cleanup below decidable.
+      const paddedFirstName = `  ${SEED_FIRST_NAME}  `;
 
-      // 1. On /profile, type "  QA  " (two leading and two trailing
-      // spaces) into the "First Name" field.
+      // 1. Type the padded value into "First Name" - accepted as typed on both
+      // builds while the field still has focus.
       await firstNameInput.fill(paddedFirstName);
-
-      // The field does NOT auto-trim on input, same as the Login page's username/email field.
       await expect(firstNameInput).toHaveValue(paddedFirstName);
 
-      // 2. Click "Save"; it succeeds with the standard success toast.
-      await saveButton.click();
-      await expect(page.locator('text=Your profile was updated successfully!')).toBeVisible();
+      // 2. Blur it. A 2026-09-17 pre-staging deploy strips the padding here;
+      // staging's older build keeps it (CLAUDE.md's rule 2: verify the build
+      // that is actually deployed). This also supersedes the test plan's
+      // section 2.6, which predates both behaviors.
+      const valueAtSave = await blurAndReadValue(firstNameInput, lastNameInput);
+      const buildTrimsOnBlur = valueAtSave === SEED_FIRST_NAME;
+      expect(valueAtSave).toBe(buildTrimsOnBlur ? SEED_FIRST_NAME : paddedFirstName);
 
-      // CORRECTED (differs from specs/account-plans/profile-settings-test-plan.md section
-      // 2.6, which claims this trims): the padded value round-trips completely UNCHANGED, neither client- nor server-side.
-      await page.goto(`${BASE_URL}/profile`);
-      await expect(firstNameInput).toHaveValue(paddedFirstName);
-
-      // Cleanup: restore the clean seed value, confirmed via the real
-      // network response (not the toast) + reload - see CLAUDE.md's second-save gotcha.
-      await firstNameInput.fill(SEED_FIRST_NAME);
+      // 3. Save, then reload: what persists is exactly what the field held at
+      // submit time - nothing trims server-side on either build, so the
+      // whitespace question is settled entirely client-side.
       await saveAndWaitForSuccess(page, saveButton);
       await page.goto(`${BASE_URL}/profile`);
+      await expect(firstNameInput).toHaveValue(valueAtSave);
+
+      // Cleanup: only the non-trimming build actually persisted something
+      // different. Restoring unconditionally would leave Save disabled (the
+      // field already holds the baseline) and hang on a save that never fires.
+      if (!buildTrimsOnBlur) {
+        await firstNameInput.fill(SEED_FIRST_NAME);
+        await saveAndWaitForSuccess(page, saveButton);
+        await page.goto(`${BASE_URL}/profile`);
+      }
       await expect(firstNameInput).toHaveValue(SEED_FIRST_NAME);
     });
 
-    test('should accept a very long First Name with no max length enforced, and remain able to restore it', async ({ page }) => {
+    test("should accept a very long First Name up to the build's own max length, and remain able to restore it", async ({ page }) => {
       const firstNameInput = page.locator('input[name="firstName"]');
       const lastNameInput = page.locator('input[name="lastName"]');
       const saveButton = page.getByRole('button', { name: 'Save' });
       const longFirstName = 'A'.repeat(243);
+
+      // A 2026-09-17 pre-staging deploy capped this field at maxlength=100;
+      // staging's build still enforces no cap at all. Read the cap off the
+      // field rather than hardcoding either build's outcome (see CLAUDE.md).
+      const maxLength = await firstNameInput.getAttribute('maxlength');
+      const expectedValue = maxLength ? 'A'.repeat(Number(maxLength)) : longFirstName;
 
       // 1. On /profile, type a 243-character value into "First Name" and
       // blur the field.
       await firstNameInput.fill(longFirstName);
       await lastNameInput.click();
 
-      // Accepted with no truncation and no inline error; 'Save' becomes enabled.
+      // Accepted with no inline error - truncated to the cap where the build
+      // has one, kept whole where it doesn't; 'Save' becomes enabled either way.
       await expect(page.locator('text=The field is required')).toHaveCount(0);
-      await expect(firstNameInput).toHaveValue(longFirstName);
+      await expect(firstNameInput).toHaveValue(expectedValue);
       await expect(saveButton).toBeEnabled();
 
       // No page-level layout break from this - same scrollWidth/clientWidth
@@ -454,11 +472,11 @@ test.describe('Profile Settings', () => {
       }));
       expect(bodyScrollWidth).toBe(bodyClientWidth);
 
-      // 2. Save, then reload - the full 243 characters genuinely persisted.
+      // 2. Save, then reload - exactly what the field held genuinely persisted.
       await saveButton.click();
       await expect(page.locator('text=Your profile was updated successfully!')).toBeVisible();
       await page.goto(`${BASE_URL}/profile`);
-      await expect(firstNameInput).toHaveValue(longFirstName);
+      await expect(firstNameInput).toHaveValue(expectedValue);
 
       // 3. Cleanup: restore, confirmed via reload rather than the toast/DOM alone.
       await firstNameInput.fill(SEED_FIRST_NAME);
