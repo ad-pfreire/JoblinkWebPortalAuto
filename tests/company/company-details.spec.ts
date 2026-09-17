@@ -1,7 +1,7 @@
 // spec: specs/company-plans/company-details-test-plan.md
 // seed: tests/seed.spec.ts
 
-import { test, expect, Page } from '@playwright/test';
+import { test, expect, Page, Locator } from '@playwright/test';
 import { requireEnv, seedEmail } from '../utils/env';
 import { clearFieldWithBackspace } from '../utils/forms';
 import { loginAndGoToCompany } from '../utils/auth';
@@ -28,17 +28,24 @@ function phoneFieldContainer(page: Page, label: string) {
 }
 
 /**
- * Types an address and waits for Google's own suggestion listbox, re-typing the
- * whole query up to three times. Returns false if no suggestions ever arrive.
+ * Types an address and returns the one suggestion matching `expected`, re-typing
+ * the whole query up to three times. Returns null if it never shows up.
  *
- * Google Places is a live, unmocked third party: in CI run 35245591547 all three
- * of Playwright's own retries failed here, and the saved DOM snapshot showed the
- * query correctly typed with no listbox rendered - Google simply answered
- * nothing for that runner. Re-typing recovers the transient misses; the caller
- * skips (never fails) when even that doesn't, so a Google outage can't turn the
- * blocking CI step red for an app that is fine.
+ * Google Places is a live, unmocked third party, and CI proved twice over that
+ * neither what it returns nor whether it returns anything can be assumed:
+ * - run 35245591547: all three of Playwright's own retries failed with no
+ *   listbox at all, the saved DOM snapshot showing the query correctly typed -
+ *   Google simply answered nothing for that runner.
+ * - run 35272367030: suggestions did arrive, but the FIRST one was a different
+ *   address entirely ('1725 W North Ave'), because Google ranks by the caller's
+ *   own IP - the same query put Santa Maria first from a local machine the same
+ *   afternoon. Picking `.first()` was never safe, it had just been lucky.
+ *
+ * Hence: match the wanted suggestion by its text, and let the caller skip (never
+ * fail) when Google doesn't offer it - a third party's ranking isn't a defect
+ * this suite can report, and shouldn't redden the blocking step.
  */
-async function typeAddressAndWaitForSuggestions(page: Page, query: string): Promise<boolean> {
+async function typeAddressAndFindSuggestion(page: Page, query: string, expected: RegExp): Promise<Locator | null> {
   const addressCombobox = page.getByRole('combobox', { name: 'Address' });
   for (let attempt = 0; attempt < 3; attempt++) {
     await addressCombobox.click();
@@ -50,9 +57,11 @@ async function typeAddressAndWaitForSuggestions(page: Page, query: string): Prom
       .waitFor({ state: 'visible', timeout: 15_000 })
       .then(() => true)
       .catch(() => false);
-    if (arrived) return true;
+    if (!arrived) continue;
+    const match = page.getByRole('option').filter({ hasText: expected }).first();
+    if ((await match.count()) > 0) return match;
   }
-  return false;
+  return null;
 }
 
 /** Clicks 'Save', waits for the real 200 response, then the redirect - this flow has no success toast (see test 4.1). */
@@ -232,18 +241,19 @@ test.describe('Company Details', () => {
       const stateBeforeSelection = await page.locator('#mui-component-select-state').textContent();
       const addressCombobox = page.getByRole('combobox', { name: 'Address' });
 
-      // A real listbox appears (unmocked Google Places, unstable suggestion
-      // order) - always selects the FIRST one, which reliably resolves to Santa Barbara County, CA, 93458.
-      const suggestionsArrived = await typeAddressAndWaitForSuggestions(page, '1725 W North Broadway Anaheim');
+      // A real listbox appears (unmocked Google Places). Picks the Santa Maria
+      // suggestion by name rather than by position - the assertions below are
+      // about that specific place's own City/Zip, and Google's ranking varies
+      // by caller IP (see the helper).
+      const suggestion = await typeAddressAndFindSuggestion(page, '1725 W North Broadway Anaheim', /1725 North Broadway.*Santa Maria/);
       test.skip(
-        !suggestionsArrived,
-        'Google Places returned no suggestions across three real attempts - a live third-party dependency, not an app or suite defect.'
+        suggestion === null,
+        "Google Places never offered the '1725 North Broadway, Santa Maria' suggestion across three real attempts - a live third-party dependency, not an app or suite defect."
       );
-      const suggestion = page.getByRole('option').first();
-      await expect(suggestion).toBeVisible();
+      await expect(suggestion!).toBeVisible();
 
-      // 2. Click the first suggested option.
-      await suggestion.click();
+      // 2. Click that suggested option.
+      await suggestion!.click();
 
       // Address collapses to the street portion (toHaveValue, not
       // toHaveText - this combobox is a plain <input>), Zip auto-populates.
