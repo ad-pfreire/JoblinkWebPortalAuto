@@ -55,6 +55,7 @@ Playwright QA suite for the Job Link web portal (Fieldpiece pre-staging: `https:
 - [Known gotcha: `test.skip(browserName !== 'chromium', ...)` inside `beforeEach` does NOT protect a file's `beforeAll` from also running on the other projects](#known-gotcha-testskipbrowsername-chromium-inside-beforeeach-does-not-protect-a-files-beforeall-from-also-running-on-the-other-projects)
 - [Known gotcha: manually driving the MCP browser tools while a background subagent is also using them causes the two sessions to collide](#known-gotcha-manually-driving-the-mcp-browser-tools-while-a-background-subagent-is-also-using-them-causes-the-two-sessions-to-collide)
 - [Known gotcha: Company Details' "State doesn't re-hydrate on reload" bug got FIXED on the real app (2026-09-04) - the resulting locator/accessible-name change broke several tests, not just the one documenting the old bug](#known-gotcha-company-details-state-doesnt-re-hydrate-on-reload-bug-got-fixed-on-the-real-app-2026-09-04---the-resulting-locatoraccessible-name-change-broke-several-tests-not-just-the-one-documenting-the-old-bug)
+- [Known gotcha: a 2026-09-17 pre-staging deploy hardened input validation app-wide (trim on blur, max lengths, URL format) and invalidated seven tests across four files at once](#known-gotcha-a-2026-09-17-pre-staging-deploy-hardened-input-validation-app-wide-trim-on-blur-max-lengths-url-format-and-invalidated-seven-tests-across-four-files-at-once)
 
 **Seed Account, Data Isolation & Portability**
 - [Known gotcha: `profile-settings.spec.ts`'s wrong-Current-Password tests can trip Cognito's own real account-level attempt-limit throttle on the shared seed account](#known-gotcha-profile-settingsspectss-wrong-current-password-tests-can-trip-cognitos-own-real-account-level-attempt-limit-throttle-on-the-shared-seed-account)
@@ -258,6 +259,8 @@ A read-only summary field rendering two values separated by a real `<br>` (e.g. 
 
 Company Details' Address field uses a real (unmocked) Google Places Autocomplete API, which occasionally doesn't respond with suggestions inside a generous timeout - genuine external flakiness, not a bug. In `test.describe.configure({ mode: 'serial' })`, one failed test skips every remaining test in that file as "did not run", so a single flaky external call can silently zero out an entire spec file's results. Fix: add `retries: N` to the same `describe.configure({ mode: 'serial', retries: 2 })` call for any file with a real external dependency baked into a serial sequence - Playwright re-runs the failed test (and, in serial mode, everything from that point onward) rather than abandoning the rest of the file. Only safe when the flaky test doesn't leave residual mutated state on failure (Company Details' Address test never saves, only reloads to discard) - see `tests/company/company-details.spec.ts`.
 
+**Retries alone turned out not to be enough (2026-09-17)**: in CI run `35245591547` all three attempts of test 2.4 failed identically, and the saved DOM snapshot showed the query correctly typed into the field with no listbox ever rendered - Google simply answered nothing for that runner, three times in a row, while the same query returned five suggestions locally the same afternoon. A third party being down is not a result this suite can report as a defect, so 2.4 now re-types the whole query up to three times (`typeAddressAndWaitForSuggestions()`) and, if suggestions still never arrive, calls `test.skip()` with a reason naming Google Places - the same skip-don't-fail shape already used for Cognito's attempt-limit throttle. A skipped test doesn't cascade in serial mode either, so a Google outage no longer costs the rest of the file (46 tests didn't run in that CI run because of this one). The test still fails normally on anything that is actually about the app: a missing listbox is the only skippable outcome.
+
 ## Known gotcha: `page.getByRole('alert', { name: '...', exact: true })` can report "not found" even while the exact text is already visible in the DOM
 
 Live-verified via direct diagnostic logging on Payments (submitting a form with a required Stripe AddressElement field left blank): `page.evaluate(() => document.querySelectorAll('[role="alert"]'))` found the expected error text (e.g. `'Please provide your full name.'`) present, in duplicate, in the top-level document the SAME instant that `expect(page.getByRole('alert', { name: '...', exact: true })).toBeVisible()` was timing out with "element(s) not found". Root cause not fully isolated (Playwright's accessible-name computation for these MUI `Alert` regions not lining up with their live textContent in this instant - possibly an ARIA live-region timing quirk, not something this suite controls), but the practical fix is straightforward and more robust anyway: assert on visible TEXT (`page.getByText('...', { exact: true }).first()`, `.first()` because the same alert can genuinely render twice - same general "hidden duplicate" pattern already documented elsewhere in this app) rather than role+accessible-name matching, whenever asserting that a *specific* alert message appeared. This is a distinct issue from - but the same general family as - the already-documented Next.js route-announcer `getByRole('alert')` gotcha above; between the two, prefer text-based assertions over role-based ones for this app's alerts generally.
@@ -286,6 +289,40 @@ Live-verified mid-session while writing `tests/teams/teams.spec.ts`: calling `pl
 ## Known gotcha: a team/member card's own accessible role (link vs button) can differ between two otherwise-identical loads of the SAME page, not just between different pages
 
 `tests/teams/teams.spec.ts`'s own `teamCard()` helper already documented that a team card renders as a `button` on `/teams/list` but as a `link` on `/teams` (For You) - and already matches either role for exactly that reason. Live-verified 2026-09-07 that this isn't a clean per-page rule: a *separate*, bare `getByRole('link', { name: /member/ })` assertion in test 1.1 (checking the SAME `/teams` page `teamCard()` had just confirmed via its own `.or()`-based locator) failed 3 real runs in a row with the card rendering as a `button` there instead - i.e. the SAME page, same account, same code path, gave a different real ARIA role across separate loads. Fix: any assertion against one of these cards' own role - not just via `teamCard()`, but a raw, ad hoc `getByRole()` written directly in a test - must match `.or()` across both `link` and `button`, never assume one role is safe because "this is the /teams page, not /teams/list". Grep for other bare `getByRole('link'|'button', { name: /member/ })` calls before adding a new one.
+
+## Known gotcha: a 2026-09-17 pre-staging deploy hardened input validation app-wide (trim on blur, max lengths, URL format) and invalidated seven tests across four files at once
+
+Live-verified 2026-09-17, after CI run `35245591547` turned the blocking core step red on a docs-only commit (the deploy-not-the-commit pattern rule 3 of the Portability section already warns about). One pre-staging deploy shipped three separate input-validation changes at once, none of them on staging. **CI only ever showed the first of the three**: this file's describes are `mode: 'serial'`, so the earliest failure skipped the 46 tests behind it, and the other two only surfaced on a full local re-run. After adapting to a failure like this, re-run the whole file before assuming you are done.
+
+**Change 1 - every text field strips leading/trailing whitespace when it loses focus**, not on input, and not server-side:
+
+- The value stays exactly as typed while the field still has focus (measured at +1s, +2s and +3s, still padded), so **any read taken before the blur proves nothing**. `fill()` followed immediately by `toHaveValue()` passes on both builds; the same assertion one line later, after the next `fill()` moved focus, fails on the trimming build. That is precisely how it surfaced.
+- Nothing trims server-side on either build: what persists is exactly what the field held at submit time. Clicking a Save/Create/Log In button blurs the field first, so the submitted value is the trimmed one.
+- It is app-wide, not per-page: confirmed on Login's `username`, Profile's `firstName`, the Create Team modal's `Name` and the Update Team Name modal's `Name`.
+- **Staging does not do this** - same-day check on the same fields. The two environments run different builds for weeks at a time, so hardcoding either outcome goes red on the other one.
+
+**Change 2 - First Name and Last Name are capped at `maxlength=100`** (`profile-settings`' long-name test typed 243 characters and got exactly 100 back). Read the cap off the field's own attribute and derive the expected value from it; a build with no cap returns `null` and the same test still asserts the full value.
+
+**Change 3 - Company Website now validates its format client-side**: an invalid value marks the field `aria-invalid="true"` with an `Invalid URL` helper text and **keeps Save disabled**, so it can no longer reach the backend at all. That closes the REAL BUG `company-details` 3.4 documented (a 200 response, no feedback of any kind, value silently discarded server-side). The same build also prepends `https://` to a scheme-less value on blur - worth knowing, but don't assert it where it isn't the point.
+
+Use `blurAndReadValue()` (`tests/utils/forms.ts`) to read what a field actually holds once focus leaves, then assert that build's own outcome - never assume which build is deployed. The seven tests this invalidated, and what each now asserts:
+
+| Test | Pre-staging's hardened build | Staging's older build |
+| --- | --- | --- |
+| `login-cases` "whitespace-padded username" | padding gone before submit, so the login **succeeds** | padded value is sent as-is, "Incorrect username or password." |
+| `profile-settings` "padded First Name round-trip" | persists trimmed - equal to the baseline, so the cleanup save must be **skipped** or it hangs on a disabled Save | persists padded, cleanup restores the baseline |
+| `teams` 2.2 | 'Update' stays disabled, "The field is required" stays up | REAL BUG: 'Update' enables on whitespace only |
+| `teams` 3.2 | 'Create' never enables; blurring empties the field | REAL BUG: a blank-named team is genuinely persisted |
+| `teams` 3.3b | `'  My Team  '` trims into 3.3's duplicate guard, nothing created | REAL BUG: a second, distinct team is created |
+| `profile-settings` "very long First Name" | truncated to the `maxlength` the field declares | no cap at all, 243 characters persist |
+| `company-details` 3.4 | invalid URL blocked inline, Save stays disabled | REAL BUG: POST 200, no feedback, silently discarded |
+
+Two things worth carrying forward beyond this one deploy:
+
+- **Detect the build with a neutral sentinel, never with the behavior under test.** `nameFieldTrimsOnBlur()` in `teams.spec.ts` types `'  X  '` and reads it back, so the whitespace assertions stay meaningful on both builds; branching on "is 'Update' enabled?" would have made those tests assert nothing at all.
+- **A cleanup step can depend on the build too.** `profile-settings`' restore save is skipped on the trimming build because the padded value already persisted as the baseline: the form is then not dirty, Save stays disabled, and an unconditional `saveAndWaitForSuccess()` waits forever for a request that never fires (hit for real while investigating this).
+
+Five defects this deploy fixed as a side effect - `bug-triage.md`'s Issue-020 and Issue-031 among them - which is the other reason not to just delete a test whose "REAL BUG" no longer reproduces: the branch that documents the old behavior is what proves the fix is real, and staging still runs the build that has it.
 
 ---
 
@@ -362,7 +399,7 @@ Extracted 2026-09-10, reversing the older "per-file-helper" convention. Import f
 | `tests/utils/stripe-elements.ts` | Stripe Elements **iframe** resolution (`resolveStripeFrameByContent()`, `billingAddressFrame()`, `cardElementFrame()`) |
 | `tests/utils/subscription-ui.ts` | `/subscription` plan cards (`getPlanCardState()`, `clickPlanCard()`, `selectPlanAndContinue()`, `cancelSubscriptionAndFinish()`) |
 | `tests/utils/teams-ui.ts` | `teamCard()` - matches a team card across its inconsistent `link`/`button` role |
-| `tests/utils/forms.ts` | `clearFieldWithBackspace()` |
+| `tests/utils/forms.ts` | `clearFieldWithBackspace()`, `blurAndReadValue()` |
 
 **Why this was worth reversing the old decision**: the duplication was the direct cause of three separate incidents. Two are documented above (the Company Name `fill()` race fixed in 4.1 but not 4.1b; `getVerificationLink()` fixed as `getInvitationLink()` but never replicated). The third was found *by* this extraction: `account-deletion-billing.spec.ts` was still carrying a **stale** `stripeFindCustomerByEmail()` with no Search fallback - the 2026-09-08 Test Clock fix had been applied to `utils/stripe.ts` and `teams-plan-gating.spec.ts` but never to that third copy, in a file that genuinely uses Test Clocks. It had not fired yet only because its lookups happen before the clock is attached.
 
