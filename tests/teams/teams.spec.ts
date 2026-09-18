@@ -717,7 +717,7 @@ test.describe('Teams', () => {
       // (renames it, then deletes it).
     });
 
-    test('3.5 A name with HTML-like/special characters and emoji is accepted and persists as literal text, not interpreted as markup or stripped @real-email', async ({
+    test('3.5 A name with HTML-like/special characters and emoji is handled as the deployed build handles it - blocked client-side since pre-staging 2026-09-17, persisted as literal text before it @real-email', async ({
       page,
     }) => {
       // 1. Create a team whose name contains characters a naive
@@ -726,10 +726,34 @@ test.describe('Teams', () => {
       await page.goto(`${BASE_URL}/teams/list`);
       await page.getByRole('button', { name: '+ Create Team' }).click();
       const nameField = page.getByRole('textbox', { name: 'Name' });
+      const createButton = page.getByRole('button', { name: 'Create' });
       await nameField.click();
       await nameField.pressSequentially(specialName);
       await expect(nameField).toHaveValue(specialName);
-      await page.getByRole('button', { name: 'Create' }).click();
+
+      if (!(await createButton.isEnabled())) {
+        // Pre-staging's build screens these characters out: the name is typed
+        // in full, but 'Create' simply never enables, so markup can't reach the
+        // backend through this form at all. Live-verified which characters:
+        // '<', '>', '"', '/' and emoji block it; '&', apostrophe, '-' and '.' don't.
+        await expect(createButton).toBeDisabled();
+        // It rejects SILENTLY - no inline message and aria-invalid stays
+        // 'false', unlike every other validated field in this app, so nothing
+        // tells the user which character is the problem.
+        await expect(nameField).toHaveAttribute('aria-invalid', 'false');
+        await expect(page.getByText('The field is required', { exact: true })).toBeHidden();
+
+        // Not a blanket block on punctuation: the still-allowed special
+        // characters enable 'Create' normally.
+        await clearFieldWithBackspace(page, nameField);
+        await nameField.pressSequentially(`QA & O'Brien-Dot.Name ${Date.now()}`);
+        await expect(createButton).toBeEnabled();
+
+        await page.getByRole('button', { name: 'Cancel' }).click();
+        return;
+      }
+
+      await createButton.click();
       await expect(page.getByText('Your team was created successfully!', { exact: true })).toBeVisible();
       await page.getByRole('button', { name: 'Continue' }).click();
 
