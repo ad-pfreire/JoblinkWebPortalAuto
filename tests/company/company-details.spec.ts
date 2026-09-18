@@ -405,6 +405,12 @@ test.describe('Company Details', () => {
     test('3.4 An invalid Company Website is rejected as the deployed build rejects it - inline since pre-staging 2026-09-17, a REAL BUG (silent, feedback-free server-side rejection) before it', async ({
       page,
     }) => {
+      // The edit form's fields can stay non-editable well past the 30s default
+      // while this page hydrates on a CI runner - seen once as a flaky
+      // `locator.fill` timeout in run 35353160251, which in a serial file costs
+      // a retry of the whole group. Slow local runs never show it.
+      test.slow();
+
       await page.goto(`${BASE_URL}/company?edit=true`);
       const website = page.getByRole('textbox', { name: 'Company Website' });
       const contractorLicense = page.getByRole('textbox', { name: 'Contractor License' });
@@ -412,6 +418,7 @@ test.describe('Company Details', () => {
 
       // 1. Type an obviously invalid, non-URL value (e.g. 'not a url') into
       // 'Company Website' and blur it - this alone dirties the form and enables Save.
+      await expect(website).toBeEditable({ timeout: 30_000 });
       await website.click();
       await website.fill('not a url');
       await contractorLicense.click();
