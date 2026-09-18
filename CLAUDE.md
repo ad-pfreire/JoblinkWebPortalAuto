@@ -55,7 +55,7 @@ Playwright QA suite for the Job Link web portal (Fieldpiece pre-staging: `https:
 - [Known gotcha: `test.skip(browserName !== 'chromium', ...)` inside `beforeEach` does NOT protect a file's `beforeAll` from also running on the other projects](#known-gotcha-testskipbrowsername-chromium-inside-beforeeach-does-not-protect-a-files-beforeall-from-also-running-on-the-other-projects)
 - [Known gotcha: manually driving the MCP browser tools while a background subagent is also using them causes the two sessions to collide](#known-gotcha-manually-driving-the-mcp-browser-tools-while-a-background-subagent-is-also-using-them-causes-the-two-sessions-to-collide)
 - [Known gotcha: Company Details' "State doesn't re-hydrate on reload" bug got FIXED on the real app (2026-09-04) - the resulting locator/accessible-name change broke several tests, not just the one documenting the old bug](#known-gotcha-company-details-state-doesnt-re-hydrate-on-reload-bug-got-fixed-on-the-real-app-2026-09-04---the-resulting-locatoraccessible-name-change-broke-several-tests-not-just-the-one-documenting-the-old-bug)
-- [Known gotcha: a 2026-09-17 pre-staging deploy hardened input validation app-wide (trim on blur, max lengths, URL format) and invalidated seven tests across four files at once](#known-gotcha-a-2026-09-17-pre-staging-deploy-hardened-input-validation-app-wide-trim-on-blur-max-lengths-url-format-and-invalidated-seven-tests-across-four-files-at-once)
+- [Known gotcha: a 2026-09-17 pre-staging deploy hardened input validation app-wide (trim on blur, max lengths, URL format, team-name characters) and invalidated eight tests across four files at once](#known-gotcha-a-2026-09-17-pre-staging-deploy-hardened-input-validation-app-wide-trim-on-blur-max-lengths-url-format-team-name-characters-and-invalidated-eight-tests-across-four-files-at-once)
 
 **Seed Account, Data Isolation & Portability**
 - [Known gotcha: `profile-settings.spec.ts`'s wrong-Current-Password tests can trip Cognito's own real account-level attempt-limit throttle on the shared seed account](#known-gotcha-profile-settingsspectss-wrong-current-password-tests-can-trip-cognitos-own-real-account-level-attempt-limit-throttle-on-the-shared-seed-account)
@@ -295,9 +295,9 @@ Live-verified mid-session while writing `tests/teams/teams.spec.ts`: calling `pl
 
 `tests/teams/teams.spec.ts`'s own `teamCard()` helper already documented that a team card renders as a `button` on `/teams/list` but as a `link` on `/teams` (For You) - and already matches either role for exactly that reason. Live-verified 2026-09-07 that this isn't a clean per-page rule: a *separate*, bare `getByRole('link', { name: /member/ })` assertion in test 1.1 (checking the SAME `/teams` page `teamCard()` had just confirmed via its own `.or()`-based locator) failed 3 real runs in a row with the card rendering as a `button` there instead - i.e. the SAME page, same account, same code path, gave a different real ARIA role across separate loads. Fix: any assertion against one of these cards' own role - not just via `teamCard()`, but a raw, ad hoc `getByRole()` written directly in a test - must match `.or()` across both `link` and `button`, never assume one role is safe because "this is the /teams page, not /teams/list". Grep for other bare `getByRole('link'|'button', { name: /member/ })` calls before adding a new one.
 
-## Known gotcha: a 2026-09-17 pre-staging deploy hardened input validation app-wide (trim on blur, max lengths, URL format) and invalidated seven tests across four files at once
+## Known gotcha: a 2026-09-17 pre-staging deploy hardened input validation app-wide (trim on blur, max lengths, URL format, team-name characters) and invalidated eight tests across four files at once
 
-Live-verified 2026-09-17, after CI run `35245591547` turned the blocking core step red on a docs-only commit (the deploy-not-the-commit pattern rule 3 of the Portability section already warns about). One pre-staging deploy shipped three separate input-validation changes at once, none of them on staging. **CI only ever showed the first of the three**: this file's describes are `mode: 'serial'`, so the earliest failure skipped the 46 tests behind it, and the other two only surfaced on a full local re-run. After adapting to a failure like this, re-run the whole file before assuming you are done.
+Live-verified 2026-09-17, after CI run `35245591547` turned the blocking core step red on a docs-only commit (the deploy-not-the-commit pattern rule 3 of the Portability section already warns about). One pre-staging deploy shipped **four** separate input-validation changes at once, none of them on staging - and they surfaced one at a time, over three separate runs, because `mode: 'serial'` means the earliest failure skips everything behind it. The core step showed only change 1 (46 tests never ran); changes 2 and 3 appeared on a full local re-run of those files; change 4 only appeared in the next CI run's own non-blocking real-email step. **Budget for this: adapting to one failure in a serial file does not mean you have seen them all** - re-run each affected file end to end, and treat the real-email step's results as part of the same investigation rather than noise.
 
 **Change 1 - every text field strips leading/trailing whitespace when it loses focus**, not on input, and not server-side:
 
@@ -310,6 +310,8 @@ Live-verified 2026-09-17, after CI run `35245591547` turned the blocking core st
 
 **Change 3 - Company Website now validates its format client-side**: an invalid value marks the field `aria-invalid="true"` with an `Invalid URL` helper text and **keeps Save disabled**, so it can no longer reach the backend at all. That closes the REAL BUG `company-details` 3.4 documented (a 200 response, no feedback of any kind, value silently discarded server-side). The same build also prepends `https://` to a scheme-less value on blur - worth knowing, but don't assert it where it isn't the point.
 
+**Change 4 - Team Name is capped at `maxlength=100` and screens characters out**, which closes `bug-triage.md`'s Issue-018 (a 412-character name holding a literal `<script>` tag used to persist). Live-verified which: `<`, `>`, `"`, `/` and emoji leave 'Create' disabled; `&`, apostrophe, `-` and `.` don't. It rejects **silently** - no inline message, and `aria-invalid` stays `false`, unlike every other validated field in this app - so nothing tells the user which character is the problem. That silence is worth reporting as its own small defect.
+
 Use `blurAndReadValue()` (`tests/utils/forms.ts`) to read what a field actually holds once focus leaves, then assert that build's own outcome - never assume which build is deployed. The seven tests this invalidated, and what each now asserts:
 
 | Test | Pre-staging's hardened build | Staging's older build |
@@ -321,13 +323,14 @@ Use `blurAndReadValue()` (`tests/utils/forms.ts`) to read what a field actually 
 | `teams` 3.3b | `'  My Team  '` trims into 3.3's duplicate guard, nothing created | REAL BUG: a second, distinct team is created |
 | `profile-settings` "very long First Name" | truncated to the `maxlength` the field declares | no cap at all, 243 characters persist |
 | `company-details` 3.4 | invalid URL blocked inline, Save stays disabled | REAL BUG: POST 200, no feedback, silently discarded |
+| `teams` 3.5 | `<b>`/quote/emoji leave 'Create' disabled, silently | persisted as literal text, no markup injection |
 
 Two things worth carrying forward beyond this one deploy:
 
 - **Detect the build with a neutral sentinel, never with the behavior under test.** `nameFieldTrimsOnBlur()` in `teams.spec.ts` types `'  X  '` and reads it back, so the whitespace assertions stay meaningful on both builds; branching on "is 'Update' enabled?" would have made those tests assert nothing at all.
 - **A cleanup step can depend on the build too.** `profile-settings`' restore save is skipped on the trimming build because the padded value already persisted as the baseline: the form is then not dirty, Save stays disabled, and an unconditional `saveAndWaitForSuccess()` waits forever for a request that never fires (hit for real while investigating this).
 
-Five defects this deploy fixed as a side effect - `bug-triage.md`'s Issue-020 and Issue-031 among them - which is the other reason not to just delete a test whose "REAL BUG" no longer reproduces: the branch that documents the old behavior is what proves the fix is real, and staging still runs the build that has it.
+Six defects this deploy fixed as a side effect - `bug-triage.md`'s Issue-018, Issue-020 and Issue-031 among them - which is the other reason not to just delete a test whose "REAL BUG" no longer reproduces: the branch that documents the old behavior is what proves the fix is real, and staging still runs the build that has it.
 
 ---
 
